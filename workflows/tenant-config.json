@@ -1,0 +1,24 @@
+{
+  "name": "Tenant Config",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "tenant/config", "responseMode": "responseNode", "options": {} },
+      "id": "tc-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "tenant-config"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.tenant_id)throw new Error('Missing: tenant_id');\nif(!body.action)throw new Error('Missing: action');\nconst TENANTS={\n  cornerstone:{default_persona:'andrew',allowed_personas:['andrew','rebecka'],tier:'professional',alert_email:'ops@cornerstone.com'},\n  sunstate:{default_persona:'rebecka',allowed_personas:['rebecka','daniel'],tier:'enterprise',alert_email:'dispatch@sunstate.com'},\n  demo:{default_persona:'daniel',allowed_personas:['daniel','sarah','andrew','rebecka'],tier:'demo',alert_email:null},\n  default:{default_persona:'daniel',allowed_personas:['daniel','sarah','andrew','rebecka'],tier:'standard',alert_email:null}\n};\nconst action=body.action.toLowerCase();\nif(action==='get'){\n  const config=TENANTS[body.tenant_id]||null;\n  if(!config)return [{json:{error:'Tenant not found',tenant_id:body.tenant_id}}];\n  return [{json:{tenant_id:body.tenant_id,config}}];\n}else if(action==='list'){\n  const list=Object.entries(TENANTS).map(([id,c])=>({tenant_id:id,tier:c.tier,default_persona:c.default_persona}));\n  return [{json:{tenants:list,total:list.length}}];\n}else if(action==='validate'){\n  const exists=!!TENANTS[body.tenant_id];\n  const config=TENANTS[body.tenant_id]||TENANTS['default'];\n  return [{json:{valid:exists,tenant_id:body.tenant_id,tier:config.tier,default_persona:config.default_persona}}];\n}else{throw new Error('Invalid action. Use: get, list, or validate');}"
+      },
+      "id": "tc-process", "name": "Process Config", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "tc-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Process Config","type":"main","index":0}]]},
+    "Process Config": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

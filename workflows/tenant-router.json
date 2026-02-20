@@ -1,0 +1,42 @@
+{
+  "name": "Tenant Router",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "tenant/route", "responseMode": "responseNode", "options": {} },
+      "id": "tr-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "tenant-route"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.tenant_id)throw new Error('Missing: tenant_id');\nif(!body.request_type)throw new Error('Missing: request_type');\nconst TENANTS={\n  cornerstone:{default_persona:'andrew',allowed_personas:['andrew','rebecka'],tier:'professional'},\n  sunstate:{default_persona:'rebecka',allowed_personas:['rebecka','daniel'],tier:'enterprise'},\n  demo:{default_persona:'daniel',allowed_personas:['daniel','sarah','andrew','rebecka'],tier:'demo'},\n  default:{default_persona:'daniel',allowed_personas:['daniel','sarah','andrew','rebecka'],tier:'standard'}\n};\nconst config=TENANTS[body.tenant_id]||TENANTS['default'];\nconst rt=(body.request_type||'').toLowerCase();\nlet persona=config.default_persona,webhook='';\nconst PERSONA_WEBHOOKS={daniel:'/webhook/daniel/followup',sarah:'/webhook/sarah/content',andrew:'/webhook/andrew/report',rebecka:'/webhook/rebecka/meeting'};\nif(rt.includes('sales')||rt.includes('follow')||rt.includes('deal')){persona='daniel';}\nelse if(rt.includes('content')||rt.includes('blog')||rt.includes('marketing')){persona='sarah';}\nelse if(rt.includes('report')||rt.includes('ops')||rt.includes('cost')){persona='andrew';}\nelse if(rt.includes('meeting')||rt.includes('brief')||rt.includes('prep')){persona='rebecka';}\nelse if(rt.includes('deploy')||rt.includes('scenario')){persona='system';webhook='/webhook/makecom/deploy';}\nelse if(rt.includes('pipeline')){persona='system';webhook='/webhook/project/pipeline';}\nif(!config.allowed_personas.includes(persona)&&persona!=='system')persona=config.default_persona;\nif(!webhook)webhook=PERSONA_WEBHOOKS[persona]||PERSONA_WEBHOOKS.daniel;\nconst payload=body.payload||{};\npayload.tenant_context={tenant_id:body.tenant_id,tier:config.tier,routed_by:'tenant-router'};\nif(!payload.customer_name)payload.customer_name=body.tenant_id;\nif(persona==='sarah'&&!payload.topic)payload.topic=body.request_type;\nif(persona==='andrew'&&!payload.client_id)payload.client_id=body.tenant_id;\nif(persona==='rebecka'&&!payload.client_name)payload.client_name=body.tenant_id;\nreturn [{json:{persona,webhook,payload,tenant_id:body.tenant_id,tier:config.tier,priority:body.priority||'normal',start_time:Date.now()}}];"
+      },
+      "id": "tr-route", "name": "Route Request", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "=https://n8n-production-13ed.up.railway.app{{ $json.webhook }}",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {"timeout":60000}
+      },
+      "id": "tr-forward", "name": "Forward Request", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res=$input.first().json;const route=$('Route Request').first().json;\nconst execTime=Date.now()-route.start_time;\nconst resData=Array.isArray(res)?res[0]:res;\nreturn [{json:{\n  tenant_id:route.tenant_id,routed_to:route.persona,webhook_called:route.webhook,\n  tier:route.tier,persona_response:resData,execution_time_ms:execTime,routed_at:new Date().toISOString()\n}}];"
+      },
+      "id": "tr-transform", "name": "Build Response", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [910, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "tr-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Route Request","type":"main","index":0}]]},
+    "Route Request": {"main":[[{"node":"Forward Request","type":"main","index":0}]]},
+    "Forward Request": {"main":[[{"node":"Build Response","type":"main","index":0}]]},
+    "Build Response": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}
