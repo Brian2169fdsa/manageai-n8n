@@ -89,39 +89,60 @@ curl -X POST https://<your-domain>/api/v1/workflows \
 
 ### Available Workflows
 
-- **`test-workflow.json`** — Ping/pong endpoint (`GET /webhook/ping`). Import first to verify your deployment.
-- **`sample-make-equivalent.json`** — Full workflow bridging n8n to agenticmakebuilder `POST /plan` with webhook trigger, input validation, HTTP request, error handling via `onError: continueRegularOutput`, and response transformation.
+**Infrastructure:**
+
+- **`test-workflow.json`** — Ping/pong endpoint (`GET /webhook/ping`). Import first to verify deployment.
+- **`sample-make-equivalent.json`** — Bridge to agenticmakebuilder `POST /plan`.
+
+**Persona Workflows:**
+
+| Workflow | Webhook | Persona |
+|---|---|---|
+| [`daniel-sales-followup.json`](workflows/daniel-sales-followup.json) | `POST /webhook/daniel/followup` | Daniel — Sales follow-ups |
+| [`sarah-content-generator.json`](workflows/sarah-content-generator.json) | `POST /webhook/sarah/content` | Sarah — Content generation |
+| [`andrew-ops-report.json`](workflows/andrew-ops-report.json) | `POST /webhook/andrew/report` | Andrew — Ops reports |
+| [`rebecka-meeting-prep.json`](workflows/rebecka-meeting-prep.json) | `POST /webhook/rebecka/meeting` | Rebecka — Meeting prep |
+
+**Automated Monitors:**
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| [`pipeline-monitor.json`](workflows/pipeline-monitor.json) | Every 1 hour | Stalled project alerts to Slack |
+| [`cost-weekly-report.json`](workflows/cost-weekly-report.json) | Monday 9am | Weekly cost summary to Slack |
+
+See [`workflows/README.md`](workflows/README.md) for full documentation, inputs, and example curl commands.
 
 ## Connecting to AgenticMakeBuilder
 
-The sample workflow connects to:
+All persona workflows connect to:
 - **AgenticMakeBuilder:** https://agenticmakebuilder-production.up.railway.app
 
 ### Quick test
 
 ```bash
-# Simple prompt
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/plan \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Build a webhook that validates order data and sends to Slack"}'
+# Ping/pong
+curl https://n8n-production-13ed.up.railway.app/webhook/ping
 
-# Structured request (full agenticmakebuilder format)
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/plan \
+# Daniel — sales follow-up
+curl -X POST https://n8n-production-13ed.up.railway.app/webhook/daniel/followup \
   -H "Content-Type: application/json" \
-  -d '{
-    "customer_name": "Acme Corp",
-    "original_request": "Webhook receives order, validates, notifies Slack",
-    "ticket_summary": "Order notification workflow",
-    "business_objective": "Automate order alerts",
-    "trigger_type": "webhook",
-    "trigger_description": "HTTP POST with JSON order payload",
-    "processing_steps": ["Validate order JSON via util", "Format message via util"],
-    "output_action": "Send to Slack channel via slack",
-    "expected_output": "Slack notification sent"
-  }'
+  -d '{"customer_name": "Jane Smith", "company": "Acme Corp", "deal_stage": "proposal"}'
+
+# Sarah — content generation
+curl -X POST https://n8n-production-13ed.up.railway.app/webhook/sarah/content \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "AI automation for agencies", "format": "blog"}'
+
+# Andrew — ops report
+curl -X POST https://n8n-production-13ed.up.railway.app/webhook/andrew/report \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "acme-corp", "report_type": "weekly"}'
+
+# Rebecka — meeting prep
+curl -X POST https://n8n-production-13ed.up.railway.app/webhook/rebecka/meeting \
+  -H "Content-Type: application/json" \
+  -d '{"client_name": "Acme Corp", "meeting_type": "quarterly review", "agenda_items": ["Q4 review", "Q1 planning"]}'
 ```
-
-The workflow validates input, forwards to agenticmakebuilder `/plan`, transforms the response, and returns the plan with metadata.
 
 ## Local Development
 
