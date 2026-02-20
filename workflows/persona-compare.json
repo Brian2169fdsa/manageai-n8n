@@ -7,7 +7,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.message)throw new Error('Missing: message');\nconst personas=body.personas||['daniel','sarah','andrew','rebecka'];\nreturn [{json:{message:body.message,personas,client_id:body.client_id||''}}];"
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.message)throw new Error('Missing: message');\nconst personas=body.personas||['daniel','sarah'];\nreturn [{json:{message:body.message,personas,client_id:body.client_id||''}}];"
       },
       "id": "pcomp-validate", "name": "Validate Input", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
     },
@@ -17,7 +17,7 @@
         "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
         "sendBody": true, "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({persona:'daniel',message:$json.message,client_id:$json.client_id}) }}",
-        "options": {"timeout":60000}
+        "options": {"timeout":15000}
       },
       "id": "pcomp-daniel", "name": "POST Daniel", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
     },
@@ -27,48 +27,26 @@
         "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
         "sendBody": true, "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({persona:'sarah',message:$('Validate Input').first().json.message,client_id:$('Validate Input').first().json.client_id}) }}",
-        "options": {"timeout":60000}
+        "options": {"timeout":15000}
       },
       "id": "pcomp-sarah", "name": "POST Sarah", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [910, 300], "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
-        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
-        "sendBody": true, "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({persona:'andrew',message:$('Validate Input').first().json.message,client_id:$('Validate Input').first().json.client_id}) }}",
-        "options": {"timeout":60000}
+        "jsCode": "const danielRes=$('POST Daniel').first().json;const sarahRes=$input.first().json;const validated=$('Validate Input').first().json;const extract=(r)=>{const msg=r.message||r.response||r.content||'';return {response:msg,length:msg.length,word_count:msg.split(/\\s+/).filter(w=>w).length};};const results={daniel:extract(danielRes),sarah:extract(sarahRes)};const lengths=Object.entries(results).map(([p,r])=>({persona:p,length:r.length})).sort((a,b)=>b.length-a.length);return [{json:{message:validated.message,compared_personas:Object.keys(results),results,comparison:{most_detailed:lengths[0]?.persona||'none',shortest:lengths[lengths.length-1]?.persona||'none',response_lengths:Object.fromEntries(Object.entries(results).map(([p,r])=>[p,r.length])),word_counts:Object.fromEntries(Object.entries(results).map(([p,r])=>[p,r.word_count]))},compared_at:new Date().toISOString()}}];"
       },
-      "id": "pcomp-andrew", "name": "POST Andrew", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1130, 300], "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
-        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
-        "sendBody": true, "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({persona:'rebecka',message:$('Validate Input').first().json.message,client_id:$('Validate Input').first().json.client_id}) }}",
-        "options": {"timeout":60000}
-      },
-      "id": "pcomp-rebecka", "name": "POST Rebecka", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1350, 300], "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const danielRes=$('POST Daniel').first().json;\nconst sarahRes=$('POST Sarah').first().json;\nconst andrewRes=$('POST Andrew').first().json;\nconst rebeckaRes=$input.first().json;\nconst validated=$('Validate Input').first().json;\nconst extract=(r)=>{const msg=r.message||r.response||r.content||'';return {response:msg,length:msg.length,word_count:msg.split(/\\s+/).filter(w=>w).length};};\nconst results={daniel:extract(danielRes),sarah:extract(sarahRes),andrew:extract(andrewRes),rebecka:extract(rebeckaRes)};\nconst lengths=Object.entries(results).map(([p,r])=>({persona:p,length:r.length})).sort((a,b)=>b.length-a.length);\nreturn [{json:{\n  message:validated.message,compared_personas:Object.keys(results),\n  results,\n  comparison:{\n    most_detailed:lengths[0]?.persona||'none',\n    shortest:lengths[lengths.length-1]?.persona||'none',\n    response_lengths:Object.fromEntries(Object.entries(results).map(([p,r])=>[p,r.length])),\n    word_counts:Object.fromEntries(Object.entries(results).map(([p,r])=>[p,r.word_count]))\n  },\n  compared_at:new Date().toISOString()\n}}];"
-      },
-      "id": "pcomp-compare", "name": "Compare Results", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1570, 300]
+      "id": "pcomp-compare", "name": "Compare Results", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1130, 300]
     },
     {
       "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
-      "id": "pcomp-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1790, 300]
+      "id": "pcomp-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1350, 300]
     }
   ],
   "connections": {
     "Webhook Trigger": {"main":[[{"node":"Validate Input","type":"main","index":0}]]},
     "Validate Input": {"main":[[{"node":"POST Daniel","type":"main","index":0}]]},
     "POST Daniel": {"main":[[{"node":"POST Sarah","type":"main","index":0}]]},
-    "POST Sarah": {"main":[[{"node":"POST Andrew","type":"main","index":0}]]},
-    "POST Andrew": {"main":[[{"node":"POST Rebecka","type":"main","index":0}]]},
-    "POST Rebecka": {"main":[[{"node":"Compare Results","type":"main","index":0}]]},
+    "POST Sarah": {"main":[[{"node":"Compare Results","type":"main","index":0}]]},
     "Compare Results": {"main":[[{"node":"Respond","type":"main","index":0}]]}
   },
   "settings": {"executionOrder":"v1"}

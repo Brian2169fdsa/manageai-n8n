@@ -17,62 +17,13 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst client_id = body.client_id;\nif (!client_id) throw new Error('Missing required field: client_id');\n\nconst validTypes = ['weekly', 'monthly'];\nconst reportType = (body.report_type || 'weekly').toLowerCase();\nif (!validTypes.includes(reportType)) throw new Error('Invalid report_type. Must be: weekly or monthly');\n\nreturn [{ json: {\n  client_id,\n  report_type: reportType,\n  include_costs: body.include_costs !== false\n}}];"
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst client_id = body.client_id;\nif (!client_id) throw new Error('Missing required field: client_id');\n\nconst validTypes = ['weekly', 'monthly'];\nconst reportType = (body.report_type || 'weekly').toLowerCase();\nif (!validTypes.includes(reportType)) throw new Error('Invalid report_type. Must be: weekly or monthly');\n\nreturn [{ json: {\n  persona: 'andrew',\n  message: 'Generate ' + reportType + ' operations report for client ' + client_id + '. Include analysis of costs, pipeline status, and operational recommendations.',\n  client_id,\n  report_type: reportType,\n  include_costs: body.include_costs !== false\n}}];"
       },
       "id": "a1-validate",
       "name": "Validate Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [470, 300]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "=https://agenticmakebuilder-production.up.railway.app/costs/summary?client_id={{ $json.client_id }}",
-        "options": { "timeout": 30000 }
-      },
-      "id": "a1-costs",
-      "name": "GET Cost Summary",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [690, 300],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://agenticmakebuilder-production.up.railway.app/pipeline/dashboard",
-        "options": { "timeout": 30000 }
-      },
-      "id": "a1-pipeline",
-      "name": "GET Pipeline Dashboard",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [910, 300],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://agenticmakebuilder-production.up.railway.app/clients/health",
-        "options": { "timeout": 30000 }
-      },
-      "id": "a1-health",
-      "name": "GET Client Health",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1130, 300],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const costData = $('GET Cost Summary').first().json || {};\nconst pipelineData = $('GET Pipeline Dashboard').first().json || {};\nconst healthData = $input.first().json || {};\nconst validated = $('Validate Input').first().json;\n\nconst dataSources = [];\nif (!costData.error && !costData.statusCode) dataSources.push('costs');\nif (!pipelineData.error && !pipelineData.statusCode) dataSources.push('pipeline');\nif (!healthData.error && !healthData.statusCode) dataSources.push('client_health');\n\nconst message = 'Generate ' + validated.report_type + ' operations report for client ' + validated.client_id + '. Include analysis of costs, pipeline status, and client health.';\n\nreturn [{ json: {\n  persona: 'andrew',\n  message: message,\n  client_id: validated.client_id,\n  report_type: validated.report_type,\n  include_costs: validated.include_costs,\n  cost_data: costData,\n  pipeline_data: pipelineData,\n  health_data: healthData,\n  data_sources: dataSources\n}}];"
-      },
-      "id": "a1-merge",
-      "name": "Merge All Data",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1350, 300]
     },
     {
       "parameters": {
@@ -84,25 +35,25 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": { "timeout": 60000 }
+        "jsonBody": "={{ JSON.stringify({persona:$json.persona,message:$json.message,client_id:$json.client_id}) }}",
+        "options": { "timeout": 30000 }
       },
       "id": "a1-http",
       "name": "POST Persona Andrew",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1570, 300],
+      "position": [690, 300],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.first().json;\nconst mergedData = $('Merge All Data').first().json;\nconst validated = $('Validate Input').first().json;\nconst costData = mergedData.cost_data || {};\nconst pipelineData = mergedData.pipeline_data || {};\nconst healthData = mergedData.health_data || {};\n\nconst narrative = res.message || res.response || res.content || 'Operations report generated by Andrew persona';\n\nconst totalCost = costData.total_cost || costData.totalCost || 0;\nconst avgMargin = costData.avg_margin || costData.avgMargin || 0;\n\nconst report = [\n  '# Operations Report — ' + validated.report_type.charAt(0).toUpperCase() + validated.report_type.slice(1),\n  '',\n  '**Client:** ' + validated.client_id,\n  '**Period:** ' + validated.report_type,\n  '**Generated:** ' + new Date().toISOString(),\n  '**Data Sources:** ' + mergedData.data_sources.join(', '),\n  '',\n  '## Summary',\n  narrative,\n  ''\n];\n\nif (validated.include_costs) {\n  report.push('## Cost Breakdown');\n  report.push('- **Total Cost:** $' + Number(totalCost).toFixed(2));\n  report.push('- **Avg Margin:** ' + Number(avgMargin).toFixed(1) + '%');\n  report.push('');\n}\n\nconst pipelineSummary = {\n  active_projects: pipelineData.active_projects || pipelineData.total || 0,\n  stalled: pipelineData.stalled || 0,\n  completed: pipelineData.completed || 0\n};\n\nconst healthStatus = {\n  overall: healthData.status || healthData.overall || 'unknown',\n  score: healthData.score || healthData.health_score || 0,\n  alerts: healthData.alerts || []\n};\n\nreturn [{ json: {\n  report_markdown: report.join('\\n'),\n  total_cost: Number(totalCost).toFixed(2),\n  avg_margin: Number(avgMargin).toFixed(1),\n  period: validated.report_type,\n  client_id: validated.client_id,\n  pipeline_summary: pipelineSummary,\n  health_status: healthStatus,\n  data_sources: mergedData.data_sources,\n  generated_at: new Date().toISOString()\n}}];"
+        "jsCode": "const res = $input.first().json;\nconst validated = $('Validate Input').first().json;\n\nconst narrative = res.message || res.response || res.content || 'Operations report generated by Andrew persona';\n\nconst report = [\n  '# Operations Report — ' + validated.report_type.charAt(0).toUpperCase() + validated.report_type.slice(1),\n  '',\n  '**Client:** ' + validated.client_id,\n  '**Period:** ' + validated.report_type,\n  '**Generated:** ' + new Date().toISOString(),\n  '',\n  '## Summary',\n  narrative\n];\n\nreturn [{ json: {\n  report_markdown: report.join('\\n'),\n  period: validated.report_type,\n  client_id: validated.client_id,\n  generated_at: new Date().toISOString()\n}}];"
       },
       "id": "a1-transform",
       "name": "Build Report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1790, 300]
+      "position": [910, 300]
     },
     {
       "parameters": {
@@ -113,16 +64,12 @@
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [2010, 300]
+      "position": [1130, 300]
     }
   ],
   "connections": {
     "Webhook Trigger": { "main": [[{ "node": "Validate Input", "type": "main", "index": 0 }]] },
-    "Validate Input": { "main": [[{ "node": "GET Cost Summary", "type": "main", "index": 0 }]] },
-    "GET Cost Summary": { "main": [[{ "node": "GET Pipeline Dashboard", "type": "main", "index": 0 }]] },
-    "GET Pipeline Dashboard": { "main": [[{ "node": "GET Client Health", "type": "main", "index": 0 }]] },
-    "GET Client Health": { "main": [[{ "node": "Merge All Data", "type": "main", "index": 0 }]] },
-    "Merge All Data": { "main": [[{ "node": "POST Persona Andrew", "type": "main", "index": 0 }]] },
+    "Validate Input": { "main": [[{ "node": "POST Persona Andrew", "type": "main", "index": 0 }]] },
     "POST Persona Andrew": { "main": [[{ "node": "Build Report", "type": "main", "index": 0 }]] },
     "Build Report": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
   },
