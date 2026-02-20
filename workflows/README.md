@@ -1,337 +1,147 @@
-# ManageAI n8n Workflow Library v2
+# ManageAI n8n Workflow Library v3
 
-Production-ready n8n workflows for ManageAI's 4 personas, orchestration pipelines, automated monitors, and health checks.
+34 production workflows for ManageAI: 4 personas, 5 Make.com bridge, 3 webhook registry, 4 error replay, 3 analytics, 2 multi-tenant, 3 advanced persona, 4 orchestration, 2 monitors, 2 scheduled reports, 2 legacy.
 
-## Architecture Overview
+## Architecture
 
 ```
-                          ManageAI n8n Platform v2
-
-  ┌──────────────┐     ┌──────────────────────────────────────────┐
-  │  Client/API  │────>│  n8n (Railway)                           │
-  │  Request     │     │                                          │
-  └──────────────┘     │  Webhook ─> Validate ─> Transform ─────>│──> Response
-                       │                │                         │
-                       │                v                         │
-                       │  ┌─────────────────────────────┐         │
-                       │  │  AgenticMakeBuilder (AMB)   │         │
-                       │  │  /persona/test              │         │
-                       │  │  /plan, /verify, /costs/*   │         │
-                       │  │  /persona/memory, /health   │         │
-                       │  └─────────────────────────────┘         │
-                       │                                          │
-                       │  Scheduled Workflows:                    │
-                       │  ┌─ Pipeline Monitor (1h) ──> Slack      │
-                       │  ├─ Cost Report (Mon 9am) ──> Slack      │
-                       │  ├─ Knowledge Sync (6am) ──> Slack       │
-                       │  └─ Health Check (30min) ──> Slack       │
-                       └──────────────────────────────────────────┘
+                    ┌─────────────────────────────┐
+                    │      Webhook Ingress         │
+                    │  /webhook/{path}             │
+                    └──────────┬──────────────────┘
+                               │
+          ┌────────────────────┼─────────────────────┐
+          │                    │                      │
+    ┌─────▼─────┐     ┌──────▼──────┐      ┌───────▼───────┐
+    │  Tenant    │     │  Persona    │      │  Direct       │
+    │  Router    │     │  Selector   │      │  Webhook      │
+    └─────┬─────┘     └──────┬──────┘      └───────┬───────┘
+          │                  │                      │
+          └──────────────────┼──────────────────────┘
+                             │
+     ┌───────────┬───────────┼───────────┬───────────┐
+     │           │           │           │           │
+  ┌──▼──┐   ┌──▼──┐   ┌───▼──┐   ┌───▼───┐   ┌──▼──────┐
+  │Daniel│   │Sarah│   │Andrew│   │Rebecka│   │Make.com  │
+  │Sales │   │Cont.│   │Ops   │   │Meeting│   │Bridge    │
+  └──┬───┘   └──┬──┘   └──┬───┘   └──┬────┘   └──┬──────┘
+     │          │          │          │            │
+     └──────────┴──────────┴──────────┴────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+        ┌─────▼──────┐ ┌───▼────┐  ┌─────▼──────┐
+        │  Analytics  │ │ Error  │  │  Registry  │
+        │  Tracking   │ │ Queue  │  │  Storage   │
+        └────────────┘ └────────┘  └────────────┘
 ```
 
-## Required Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `AGENTICMAKEBUILDER_URL` | Yes | AgenticMakeBuilder API (hardcoded default: `https://agenticmakebuilder-production.up.railway.app`) |
-| `SLACK_WEBHOOK_URL` | For monitors | Slack incoming webhook URL for alerts |
-
----
-
-## Section 1 — Persona Webhooks (v2 Enhanced)
-
-| Workflow | Webhook Path | Required Inputs | Enhanced Outputs | Status |
-|---|---|---|---|---|
-| Daniel - Sales Follow-Up | `POST /webhook/daniel/followup` | `customer_name` | `recommended_template`, `crm_update_needed`, `priority` + retry logic | Live |
-| Sarah - Content Generator | `POST /webhook/sarah/content` | `topic` | `seo_keywords[]`, `reading_time_minutes`, `format_metadata{}` | Live |
-| Andrew - Ops Report | `POST /webhook/andrew/report` | `client_id` | `pipeline_summary{}`, `health_status{}`, `data_sources[]` | Live |
-| Rebecka - Meeting Prep | `POST /webhook/rebecka/meeting` | `client_name` | `calendar_block`, `pre_read[]`, `follow_up_email_template` | Live |
-
-### Daniel — Sales Follow-Up
-
-**Webhook:** `POST /webhook/daniel/followup`
-
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `customer_name` | string | Yes | Customer contact name |
-| `company` | string | No | Company name |
-| `last_interaction` | string | No | Summary of last interaction |
-| `deal_stage` | string | No | `discovery`, `proposal`, `negotiation`, `closed_won`, `closed_lost` |
-
-**Enhanced Output:**
-- `follow_up_message` — AI-generated follow-up
-- `next_action` — Stage-appropriate next step
-- `recommended_template` — `closing-template`, `intro-template`, `proposal-template`, or `general-followup-template`
-- `crm_update_needed` — `true` if deal_stage is negotiation/closed
-- `priority` — `high` (negotiation) or `medium` (all others)
-- `deal_stage`, `customer_name`, `company`, `sent_at`
-
-**Error handling:** 503 from AMB triggers a 5-second wait + single retry.
-
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/daniel/followup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_name": "Jane Smith",
-    "company": "Acme Corp",
-    "deal_stage": "negotiation",
-    "last_interaction": "Demo call Feb 15"
-  }'
-```
-
----
-
-### Sarah — Content Generator
-
-**Webhook:** `POST /webhook/sarah/content`
-
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `topic` | string | Yes | Content topic |
-| `format` | string | No | `blog`, `email`, `social` (default: `blog`) |
-| `target_audience` | string | No | Target audience |
-| `tone` | string | No | Tone of voice (default: `professional`) |
-
-**Enhanced Output:**
-- `content`, `format`, `format_label`, `topic`, `tone`, `word_count`
-- `seo_keywords` — Top 5 keywords by frequency (words > 5 chars)
-- `reading_time_minutes` — Rounded to nearest 0.5 (word_count / 200)
-- `format_metadata` — Format-specific:
-  - blog: `h2_count`, `intro_paragraph`
-  - email: `subject_line`, `cta_detected` (bool)
-  - social: `character_count`, `platform_fit` (Twitter/LinkedIn/long-form)
-
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/sarah/content \
-  -H "Content-Type: application/json" \
-  -d '{
-    "topic": "AI automation reduces costs for agencies",
-    "format": "email",
-    "target_audience": "agency owners",
-    "tone": "conversational"
-  }'
-```
-
----
-
-### Andrew — Ops Report
-
-**Webhook:** `POST /webhook/andrew/report`
-
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `client_id` | string | Yes | Client identifier |
-| `report_type` | string | No | `weekly` or `monthly` |
-| `include_costs` | boolean | No | Include cost breakdown (default: `true`) |
-
-**Enhanced Output:**
-- `report_markdown`, `total_cost`, `avg_margin`, `period`, `client_id`
-- `pipeline_summary` — `{active_projects, stalled, completed}` from `/pipeline/dashboard`
-- `health_status` — `{overall, score, alerts[]}` from `/clients/health`
-- `data_sources` — List of successfully fetched sources (e.g. `["costs", "pipeline"]`)
-
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/andrew/report \
-  -H "Content-Type: application/json" \
-  -d '{"client_id": "acme-corp", "report_type": "weekly", "include_costs": true}'
-```
-
----
-
-### Rebecka — Meeting Prep
-
-**Webhook:** `POST /webhook/rebecka/meeting`
+## Workflow Categories
 
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `client_name` | string | Yes | Client name |
-| `meeting_type` | string | No | Type of meeting |
-| `agenda_items` | string[] | No | Agenda items list |
-| `attendees` | string[] | No | Attendee emails |
-
-**Enhanced Output:**
-- `meeting_brief`, `agenda_formatted`, `prep_notes`, `send_to`
-- `calendar_block` — ICS-compatible calendar text (VCALENDAR/VEVENT)
-- `pre_read` — Context-aware suggestions (e.g. "review" meetings get project status reminders)
-- `follow_up_email_template` — Post-meeting email skeleton
-
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/rebecka/meeting \
-  -H "Content-Type: application/json" \
-  -d '{
-    "client_name": "Acme Corp",
-    "meeting_type": "quarterly review",
-    "agenda_items": ["Q4 review", "Q1 planning"],
-    "attendees": ["jane@acme.com"]
-  }'
-```
+### Core Personas (4 workflows)
 
----
+| Workflow | Webhook | Input | Output |
+|----------|---------|-------|--------|
+| Daniel - Sales Follow-Up | POST /webhook/daniel/followup | customer_name, deal_stage | report_markdown, recommended_template, priority |
+| Sarah - Content Generator | POST /webhook/sarah/content | topic, format | report_markdown, seo_keywords, reading_time_minutes |
+| Andrew - Ops Report | POST /webhook/andrew/report | client_id, report_type | report_markdown, period, generated_at |
+| Rebecka - Meeting Prep | POST /webhook/rebecka/meeting | client_name, meeting_type | report_markdown, calendar_block, pre_read, follow_up_email_template |
 
-## Section 2 — Orchestration Workflows
+### Orchestration (4 workflows)
 
-### Full Project Pipeline
-
-**Webhook:** `POST /webhook/project/pipeline`
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Full Project Pipeline | POST /webhook/project/pipeline | 5-step: plan → verify → cost → memory → respond |
+| Persona Selector | POST /webhook/persona/select | Routes by department/urgency to correct persona |
+| Batch Briefing | POST /webhook/briefing/batch | Briefings for up to 5 clients |
+| Alert Router | POST /webhook/alerts/route | Routes alerts by type to persona + Slack |
 
-Master orchestration workflow chaining 5 AMB endpoints.
-
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `customer_name` | string | Yes | Customer name |
-| `original_request` | string | Yes | What the customer needs |
-| `trigger_type` | string | Yes | Trigger type (webhook, schedule, etc.) |
-| `output_action` | string | Yes | Expected output action |
-| `trigger_description` | string | No | Trigger details |
-| `processing_steps` | string[] | No | Processing steps |
-| `expected_output` | string | No | Expected output format |
+### Make.com Bridge (5 workflows)
 
-**Steps:**
-1. Validate + generate project_id
-2. POST `/plan` — Generate plan + extract confidence
-3. If confidence > 0.6: POST `/verify` — Auto-verify blueprint
-4. POST `/costs/track` — Cost estimate
-5. POST `/persona/memory` — Store to memory
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Deploy Bridge | POST /webhook/makecom/deploy | Deploy scenario via AMB, advance pipeline |
+| Status Checker | POST /webhook/makecom/status | Health scoring 0-100 with recommendations |
+| Teardown | POST /webhook/makecom/teardown | Confirmed teardown with memory logging |
+| Run Scenario | POST /webhook/makecom/run | Trigger scenario execution |
+| Monitor All | POST /webhook/makecom/monitor | Aggregate health across all deployments |
 
-**Output:** `project_id`, `plan`, `verification`, `cost_estimate`, `next_stage`, `pipeline_status`, `ready_for_build`
+### Webhook Registry (3 workflows)
 
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/project/pipeline \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_name": "Demo Corp",
-    "original_request": "Automate lead scoring from CRM",
-    "trigger_type": "webhook",
-    "output_action": "Return scored leads via API"
-  }'
-```
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Register | POST /webhook/registry/register | Register a webhook in static data |
+| List | GET /webhook/registry/list | List all 29+ webhooks with metadata |
+| Test | POST /webhook/registry/test | Test any webhook with default payloads |
 
----
+### Error Replay System (4 workflows)
 
-### Persona Selector
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Capture | POST /webhook/errors/capture | Capture/classify errors, store in static data |
+| List | GET /webhook/errors/list | List/filter errors with summary counts |
+| Replay | POST /webhook/errors/replay | Replay single or batch failed errors |
+| Resolve | POST /webhook/errors/resolve | Resolve with notes |
 
-**Webhook:** `POST /webhook/persona/select`
-
-Auto-routes requests to the correct persona based on department and urgency.
+### Analytics Engine (3 workflows)
 
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `customer_name` | string | No | Customer name |
-| `request_type` | string | No | Type of request |
-| `urgency` | string | No | `low`, `medium`, `high` |
-| `department` | string | No | `sales`, `marketing`, `ops`, `executive` |
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Usage Tracker | POST /webhook/analytics/usage | Track calls, tokens, errors per workflow/persona |
+| Report | GET /webhook/analytics/report | Generate reports with error rates, trends |
+| Cost | GET /webhook/analytics/cost | Combine AMB costs with local analytics |
 
-**Routing Logic:**
-- sales / "follow" → Daniel
-- marketing / "content" → Sarah
-- ops / "report" → Andrew
-- high urgency / executive → Rebecka (override)
+### Multi-Tenant (2 workflows)
 
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/persona/select \
-  -H "Content-Type: application/json" \
-  -d '{"customer_name": "Acme", "department": "sales", "urgency": "high"}'
-```
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Tenant Router | POST /webhook/tenant/route | Route by tenant_id + request_type to persona |
+| Tenant Config | POST /webhook/tenant/config | Get/list/validate tenant configurations |
 
----
-
-### Batch Briefing
-
-**Webhook:** `POST /webhook/briefing/batch`
-
-Generate briefings for multiple clients in one call.
-
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `client_ids` | string[] | Yes | Up to 5 client IDs |
-| `briefing_type` | string | No | `daily` or `weekly` |
-
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/briefing/batch \
-  -H "Content-Type: application/json" \
-  -d '{"client_ids": ["client-a", "client-b"], "briefing_type": "daily"}'
-```
-
----
-
-### Alert Router
-
-**Webhook:** `POST /webhook/alerts/route`
-
-Routes alerts to the appropriate persona and posts to Slack.
-
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `alert_type` | string | Yes | `cost_alert`, `stall_alert`, `build_fail`, `client_health` |
-| `severity` | string | No | `low`, `medium`, `high` |
-| `project_id` | string | No | Related project |
-| `message` | string | No | Alert details |
-
-**Routing:**
-- `cost_alert` + high → Daniel (recovery email)
-- `stall_alert` → Rebecka (status update)
-- `build_fail` → Andrew (incident report)
-- `client_health` + high → Rebecka (client communication)
-
-```bash
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/alerts/route \
-  -H "Content-Type: application/json" \
-  -d '{"alert_type": "cost_alert", "severity": "high", "project_id": "proj-123", "message": "Budget exceeded"}'
-```
-
----
-
-## Section 3 — Scheduled Workflows
-
-| Workflow | Schedule | Purpose |
-|---|---|---|
-| Pipeline Monitor | Every 1 hour | Check for stalled projects, alert via Slack |
-| Cost Weekly Report | Monday 9am | Weekly cost summary to Slack |
-| Knowledge Sync | Daily 6am | Health check, reindex, briefing, daily costs |
-| Webhook Health Check | Every 30 min | Test all 6 webhook endpoints, alert on failure |
-
-All scheduled workflows post to Slack via `$env.SLACK_WEBHOOK_URL`. If not set, the Slack step fails silently (onError: continueRegularOutput).
-
----
-
-## Section 4 — Error Handling
-
-### onError: continueRegularOutput
-All HTTP Request nodes use `"onError": "continueRegularOutput"`. This means if AMB returns a non-2xx status (422, 500, 503), the workflow continues with the error response as data rather than crashing.
-
-### Retry Logic (Daniel workflow)
-If AMB returns HTTP 503 (service unavailable):
-1. Error Check node detects `is_retryable: true`
-2. Wait 5s Retry node sleeps for 5 seconds
-3. POST Retry Daniel makes a second attempt
-4. Transform Response handles whichever response succeeded
-
-### Fallback Behavior (Andrew workflow)
-The Andrew workflow fetches from 3 endpoints in parallel:
-- `/costs/summary` — always available
-- `/pipeline/dashboard` — may 404 (not yet deployed)
-- `/clients/health` — may 404 (not yet deployed)
-
-The Merge All Data node gracefully handles missing data and reports which sources were successfully fetched in `data_sources[]`.
-
----
-
-## Importing All Workflows
-
-### Via CLI
-```bash
-bash scripts/manage-workflows.sh sync
-```
-
-### Via API
-```bash
-API_KEY="your-n8n-api-key"
-BASE="https://n8n-production-13ed.up.railway.app"
-
-for wf in workflows/*.json; do
-  ID=$(curl -s -X POST "$BASE/api/v1/workflows" \
-    -H "X-N8N-API-KEY: $API_KEY" -H "Content-Type: application/json" \
-    -d @"$wf" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id','?'))")
-  curl -s -X POST "$BASE/api/v1/workflows/$ID/activate" -H "X-N8N-API-KEY: $API_KEY" > /dev/null
-  echo "Imported + activated: $ID"
-done
-```
+Tenants: cornerstone (professional), sunstate (enterprise), demo (demo), default (standard).
+
+### Advanced Persona (3 workflows)
+
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Persona Chain | POST /webhook/persona/chain | Chain 1-3 personas sequentially |
+| Persona Compare | POST /webhook/persona/compare | Compare 2 persona responses side-by-side |
+| Persona Memory Sync | POST /webhook/persona/memory-sync | Sync persona feedback to context + memory |
+
+### Scheduled Monitors (4 workflows)
+
+| Workflow | Schedule | Description |
+|----------|----------|-------------|
+| Knowledge Sync | Daily 6am | Health check → reindex → briefing → costs → Slack |
+| Pipeline Monitor | Hourly | Check stalled projects, AMB health, alert if needed |
+| Cost Weekly Report | Monday 9am | Weekly cost report with WoW trend → Slack |
+| Webhook Health Check | Every 30min | Test 8 webhook endpoints, alert on failure |
+
+All scheduled workflows track run history in static data.
+
+### Legacy (2 workflows)
+
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Make Equivalent | POST /webhook/plan | Original AMB bridge from v1 |
+| Ping/Pong Test | GET /webhook/ping | Simple health check |
+
+## Error Handling
+
+All HTTP nodes use `onError: "continueRegularOutput"` — errors are captured in the response, not thrown. Webhook workflows use `responseMode: "responseNode"` with `respondWith: "allIncomingItems"` for reliable responses.
+
+## Static Data
+
+Several workflows use `$getWorkflowStaticData('global')` for persistence:
+- **Registry**: Webhook registrations
+- **Error Queue**: Error entries (capped at 100)
+- **Analytics**: Usage counters, token tracking
+- **Scheduled workflows**: Run history, check counters, alert history
+
+## Conventions
+
+- Node IDs: `{prefix}-{purpose}` (e.g., `d1-webhook`, `a1-validate`)
+- Webhook paths: `{category}/{action}` (e.g., `daniel/followup`, `errors/capture`)
+- All persona HTTP calls include `message` field (required by AMB /persona/test)
+- HTTP timeouts: 10-45s per call to stay under Railway's proxy limit
+- Sequential HTTP chains only — parallel fan-out from Code nodes is unreliable

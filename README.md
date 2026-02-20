@@ -1,175 +1,97 @@
-# ManageAI n8n v2.0
+# ManageAI n8n v3.0
 
-Self-hosted n8n deployment for ManageAI with advanced workflow orchestration, retry logic, health monitoring, and a full CLI.
+Self-hosted n8n deployment for ManageAI with 34 production workflows: Make.com deployment bridge, webhook registry, error replay system, analytics engine, multi-tenant routing, persona chaining, and a full CLI management suite.
 
 **Live instance:** https://n8n-production-13ed.up.railway.app
+**AMB Backend:** https://agenticmakebuilder-production.up.railway.app
+**GitHub:** https://github.com/Brian2169fdsa/manageai-n8n
 
-## What's New in v2
-
-- **Enhanced persona outputs** — SEO keywords, reading time, calendar blocks, CRM flags, priority levels
-- **Retry logic** — Daniel workflow retries on 503 with 5s backoff
-- **Orchestration workflows** — Full project pipeline (5-step), persona selector, batch briefing, alert router
-- **Health monitoring** — 30-minute webhook health checks across all endpoints
-- **Knowledge sync** — Daily 6am automated reindex + briefing + cost report
-- **CLI v2** — `manage-workflows.sh` with status, logs, export, health, demo commands
-- **Test suite** — Parallel webhook tests, interactive demo, load testing
-
-## Workflows (14 total)
-
-### Infrastructure
-| Workflow | Type | Path |
-|---|---|---|
-| Ping/Pong Test | Webhook | `GET /webhook/ping` |
-| Make Equivalent | Webhook | `POST /webhook/plan` |
-
-### Persona Workflows (v2 Enhanced)
-| Workflow | Webhook | Key Enhancements |
-|---|---|---|
-| Daniel - Sales Follow-Up | `POST /webhook/daniel/followup` | Retry logic, `recommended_template`, `priority`, `crm_update_needed` |
-| Sarah - Content Generator | `POST /webhook/sarah/content` | `seo_keywords[]`, `reading_time_minutes`, `format_metadata{}` |
-| Andrew - Ops Report | `POST /webhook/andrew/report` | Parallel data fetches, `pipeline_summary`, `health_status`, `data_sources[]` |
-| Rebecka - Meeting Prep | `POST /webhook/rebecka/meeting` | `calendar_block` (ICS), `pre_read[]`, `follow_up_email_template` |
-
-### Orchestration Workflows
-| Workflow | Webhook | Purpose |
-|---|---|---|
-| Full Project Pipeline | `POST /webhook/project/pipeline` | 5-step orchestration: plan, verify, cost, memory, orchestrate |
-| Persona Selector | `POST /webhook/persona/select` | Auto-route by department/urgency to correct persona |
-| Batch Briefing | `POST /webhook/briefing/batch` | Generate briefings for up to 5 clients |
-| Alert Router | `POST /webhook/alerts/route` | Route alerts to persona + Slack notification |
-
-### Scheduled Monitors
-| Workflow | Schedule | Purpose |
-|---|---|---|
-| Pipeline Monitor | Every 1 hour | Stalled project alerts to Slack |
-| Cost Weekly Report | Monday 9am | Weekly cost summary to Slack |
-| Knowledge Sync | Daily 6am | System health, reindex, briefing, costs |
-| Webhook Health Check | Every 30 min | Test all webhook endpoints, alert on failure |
-
-## Quick Test
+## Quick Start
 
 ```bash
-# Ping
-curl https://n8n-production-13ed.up.railway.app/webhook/ping
+# First-run setup
+bash scripts/setup.sh
 
-# Daniel (with v2 enrichment)
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/daniel/followup \
-  -H "Content-Type: application/json" \
-  -d '{"customer_name": "Jane", "company": "Acme", "deal_stage": "negotiation"}'
+# Import & activate all workflows
+bash scripts/manage-workflows.sh sync
 
-# Full pipeline (master orchestration)
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/project/pipeline \
-  -H "Content-Type: application/json" \
-  -d '{"customer_name": "Demo Corp", "original_request": "Automate leads", "trigger_type": "webhook", "output_action": "API response"}'
+# Test all webhooks
+bash scripts/manage-workflows.sh health
 
-# Persona auto-selector
-curl -X POST https://n8n-production-13ed.up.railway.app/webhook/persona/select \
-  -H "Content-Type: application/json" \
-  -d '{"customer_name": "Acme", "department": "marketing", "urgency": "high"}'
+# Run full demo (15 steps)
+bash scripts/demo.sh
+
+# Live monitoring dashboard
+bash scripts/monitor.sh
 ```
+
+## Workflows (34 total)
+
+| Category | Count | Webhooks |
+|----------|-------|----------|
+| Core Personas | 4 | daniel/followup, sarah/content, andrew/report, rebecka/meeting |
+| Orchestration | 4 | project/pipeline, persona/select, briefing/batch, alerts/route |
+| Make.com Bridge | 5 | makecom/deploy, makecom/status, makecom/teardown, makecom/run, makecom/monitor |
+| Webhook Registry | 3 | registry/register, registry/list, registry/test |
+| Error Replay | 4 | errors/capture, errors/list, errors/replay, errors/resolve |
+| Analytics | 3 | analytics/usage, analytics/report, analytics/cost |
+| Multi-Tenant | 2 | tenant/route, tenant/config |
+| Advanced Persona | 3 | persona/chain, persona/compare, persona/memory-sync |
+| Scheduled | 4 | (cron: daily 6am, hourly, monday 9am, every 30min) |
+| Legacy | 2 | plan, ping |
+
+See [workflows/README.md](workflows/README.md) for full documentation.
 
 ## Scripts
 
-| Script | Command | Purpose |
-|---|---|---|
-| `manage-workflows.sh` | `bash scripts/manage-workflows.sh <cmd>` | Full CLI: list, status, sync, logs, export, health, demo |
-| `test-all-webhooks.sh` | `bash scripts/test-all-webhooks.sh` | Parallel test of all 6 webhook workflows |
-| `demo.sh` | `bash scripts/demo.sh` | Interactive 10-step demo of all workflow types |
-| `load-test.sh` | `bash scripts/load-test.sh` | 40 concurrent requests (10 per persona) |
+| Script | Description |
+|--------|-------------|
+| `scripts/manage-workflows.sh` | CLI v3: list, sync, health, registry, errors, analytics, tenants, chain, compare |
+| `scripts/demo.sh` | 15-step interactive demo with all workflow categories |
+| `scripts/monitor.sh` | Live dashboard with auto-refresh (infrastructure + webhooks + services) |
+| `scripts/setup.sh` | First-run setup: prereqs, connectivity, API validation, file inventory |
+| `scripts/test-all-webhooks.sh` | Parallel webhook testing with field validation |
+| `scripts/load-test.sh` | 40 concurrent requests for load testing |
 
-### Running the Demo
+## Infrastructure
 
-```bash
-# Set your n8n URL (defaults to production)
-export N8N_BASE="https://n8n-production-13ed.up.railway.app"
+```
+Docker (n8nio/n8n) → Railway
+  ├── PostgreSQL (n8n backend)
+  ├── docker-entrypoint.sh (runtime PORT mapping)
+  └── 34 workflows (auto-import on sync)
 
-# Full interactive demo
-bash scripts/demo.sh
-
-# Quick health check
-bash scripts/manage-workflows.sh health
-
-# Run all webhook tests
-bash scripts/test-all-webhooks.sh
+AMB FastAPI → Railway
+  ├── /persona/test (all 4 personas)
+  ├── /plan, /verify, /deploy
+  ├── /costs/*, /health
+  └── /persona/memory, /persona/context
 ```
 
-## Deploy to Railway
+## Deploy
 
-### Prerequisites
-- [Railway account](https://railway.app)
-- GitHub repo connected to Railway
+```bash
+# Railway (production)
+railway up
 
-### Step-by-step
-
-1. **Clone this repo**
-   ```bash
-   git clone https://github.com/Brian2169fdsa/manageai-n8n.git
-   ```
-
-2. **Create Railway project** with PostgreSQL database
-
-3. **Set environment variables**
-   ```
-   N8N_BASIC_AUTH_ACTIVE=true
-   N8N_BASIC_AUTH_USER=<your-username>
-   N8N_BASIC_AUTH_PASSWORD=<your-password>
-   N8N_HOST=<your-railway-domain>
-   WEBHOOK_URL=https://<your-railway-domain>/
-   DB_TYPE=postgresdb
-   DB_POSTGRESDB_HOST=${{Postgres.PGHOST}}
-   DB_POSTGRESDB_PORT=${{Postgres.PGPORT}}
-   DB_POSTGRESDB_DATABASE=${{Postgres.PGDATABASE}}
-   DB_POSTGRESDB_USER=${{Postgres.PGUSER}}
-   DB_POSTGRESDB_PASSWORD=${{Postgres.PGPASSWORD}}
-   SLACK_WEBHOOK_URL=<your-slack-webhook-url>
-   ```
-
-4. **Deploy** — Railway auto-deploys on push
-
-5. **Import workflows**
-   ```bash
-   export N8N_API_KEY="your-api-key"
-   bash scripts/manage-workflows.sh sync
-   ```
+# Local Docker
+docker-compose up -d
+```
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|---|---|---|
-| `N8N_BASIC_AUTH_ACTIVE` | Yes | Enable basic auth |
-| `N8N_BASIC_AUTH_USER` | Yes | UI login username |
-| `N8N_BASIC_AUTH_PASSWORD` | Yes | UI login password |
-| `N8N_HOST` | Yes | Public hostname |
-| `WEBHOOK_URL` | Yes | Webhook base URL |
-| `DB_TYPE` | Yes | `postgresdb` |
-| `DB_POSTGRESDB_HOST` | Yes | PostgreSQL host |
-| `DB_POSTGRESDB_PORT` | No | PostgreSQL port (default: 5432) |
-| `DB_POSTGRESDB_DATABASE` | Yes | Database name |
-| `DB_POSTGRESDB_USER` | Yes | Database user |
-| `DB_POSTGRESDB_PASSWORD` | Yes | Database password |
-| `AGENTICMAKEBUILDER_URL` | No | AMB API URL (hardcoded default) |
-| `SLACK_WEBHOOK_URL` | For monitors | Slack webhook for alerts |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| N8N_BASE | n8n instance URL | https://n8n-production-13ed.up.railway.app |
+| N8N_API_KEY | n8n API key | (loaded from /tmp/n8n-api-key.txt) |
+| SLACK_WEBHOOK_URL | Slack webhook for alerts | (placeholder) |
+| DATABASE_URL | PostgreSQL connection | (Railway auto-provision) |
 
-## Connecting to AgenticMakeBuilder
+## Version History
 
-All workflows connect to: **https://agenticmakebuilder-production.up.railway.app**
-
-Endpoints used:
-- `/persona/test` — All persona workflows
-- `/plan`, `/verify` — Full project pipeline
-- `/costs/track`, `/costs/summary`, `/costs/report` — Cost tracking
-- `/persona/memory`, `/persona/context` — Knowledge sync
-- `/supervisor/stalled` — Pipeline monitor
-- `/health` — System health checks
-
-## Local Development
-
-```bash
-cp .env.example .env
-# Fill in your values
-docker compose up
-```
-
-n8n will be available at `http://localhost:5678`.
-
-See [`workflows/README.md`](workflows/README.md) for complete workflow documentation.
+| Version | Workflows | Key Features |
+|---------|-----------|-------------|
+| v1.0.0 | 2 | Initial deploy, make-equivalent bridge, ping test |
+| v1.1.0 | 8 | 4 personas + 2 scheduled monitors |
+| v2.0.0 | 14 | Error handling, retry, orchestration, batch, alerts, health checks, CLI v2 |
+| v3.0.0 | 34 | Make.com bridge, webhook registry, error replay, analytics, multi-tenant, persona chain/compare, CLI v3 |
