@@ -1,0 +1,24 @@
+{
+  "name": "Webhook Registry - Register",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "registry/register", "responseMode": "responseNode", "options": {} },
+      "id": "wr-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "registry-register"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nconst required=['webhook_name','path','description','required_fields','output_fields','owner','version'];\nconst missing=required.filter(f=>!body[f]);\nif(missing.length>0)throw new Error('Missing fields: '+missing.join(', '));\nconst id='reg-'+Date.now()+'-'+Math.random().toString(36).substring(2,6);\nconst base='https://n8n-production-13ed.up.railway.app';\nconst reqFields=Array.isArray(body.required_fields)?body.required_fields:[];\nconst curlPayload=reqFields.length>0?reqFields.reduce((o,f)=>{o[f]='example';return o;},{}):{test:true};\nconst entry={\n  id,webhook_name:body.webhook_name,path:body.path,description:body.description,\n  required_fields:reqFields,output_fields:body.output_fields||[],\n  owner:body.owner,version:body.version,\n  registered_at:new Date().toISOString(),last_tested:null,last_test_status:'never',\n  test_url:base+body.path,\n  curl_example:'curl -X POST '+base+body.path+' -H \"Content-Type: application/json\" -d \\''+JSON.stringify(curlPayload)+'\\''\n};\nconst staticData=$getWorkflowStaticData('global');\nconst registry=staticData.registry||{};\nregistry[body.path]=entry;\nstaticData.registry=registry;\nreturn [{json:{registered:true,entry,total_registered:Object.keys(registry).length}}];"
+      },
+      "id": "wr-register", "name": "Register Webhook", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "wr-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Register Webhook","type":"main","index":0}]]},
+    "Register Webhook": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

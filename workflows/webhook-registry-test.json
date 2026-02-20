@@ -1,0 +1,42 @@
+{
+  "name": "Webhook Registry - Test",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "registry/test", "responseMode": "responseNode", "options": {} },
+      "id": "wrt-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "registry-test"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.path)throw new Error('Missing required field: path');\nconst defaults={\n  '/webhook/daniel/followup':{customer_name:'RegistryTest',deal_stage:'discovery'},\n  '/webhook/sarah/content':{topic:'Registry test',format:'blog'},\n  '/webhook/andrew/report':{client_id:'registry-test',report_type:'weekly'},\n  '/webhook/rebecka/meeting':{client_name:'RegistryTest',meeting_type:'test'},\n  '/webhook/project/pipeline':{customer_name:'RegistryTest',original_request:'test',trigger_type:'webhook',output_action:'test'},\n  '/webhook/persona/select':{customer_name:'RegistryTest',department:'ops',urgency:'low'},\n  '/webhook/briefing/batch':{client_ids:['test-a'],briefing_type:'daily'},\n  '/webhook/alerts/route':{alert_type:'stall_alert',severity:'low',message:'Registry test'},\n  '/webhook/makecom/deploy':{project_id:'reg-test',scenario_name:'test',blueprint:{test:true}},\n  '/webhook/makecom/status':{scenario_id:'reg-test'},\n  '/webhook/makecom/run':{scenario_id:'reg-test'},\n  '/webhook/makecom/monitor':{},\n  '/webhook/analytics/usage':{workflow_name:'registry-test',status:'success',execution_time_ms:100},\n  '/webhook/tenant/route':{tenant_id:'demo',request_type:'test',payload:{}},\n  '/webhook/persona/chain':{chain:['daniel'],initial_payload:{customer_name:'Test'},project_id:'test'},\n  '/webhook/persona/compare':{message:'Test comparison'},\n  '/webhook/persona/memory-sync':{persona:'daniel',client_id:'test',interaction_summary:'Test',rating:5,outcome:'test'}\n};\nconst payload=body.payload||defaults[body.path]||{test:true};\nconst method=body.path==='/webhook/ping'||body.path==='/webhook/registry/list'||body.path==='/webhook/analytics/report'||body.path==='/webhook/analytics/cost'||body.path==='/webhook/errors/list'?'GET':'POST';\nreturn [{json:{path:body.path,payload,method,start_time:Date.now()}}];"
+      },
+      "id": "wrt-prepare", "name": "Prepare Test", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.method }}", "url": "=https://n8n-production-13ed.up.railway.app{{ $json.path }}",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {"timeout":45000}
+      },
+      "id": "wrt-request", "name": "Test Request", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res=$input.first().json;const prep=$('Prepare Test').first().json;\nconst endTime=Date.now();\nconst responseTimeMs=endTime-prep.start_time;\nconst hasError=!!res.error||res.statusCode>=400;\nconst bodyStr=JSON.stringify(res);\nreturn [{json:{\n  path:prep.path,status_code:res.statusCode||200,response_time_ms:responseTimeMs,\n  passed:!hasError,response_preview:bodyStr.substring(0,500),tested_at:new Date().toISOString()\n}}];"
+      },
+      "id": "wrt-analyze", "name": "Analyze Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [910, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "wrt-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Prepare Test","type":"main","index":0}]]},
+    "Prepare Test": {"main":[[{"node":"Test Request","type":"main","index":0}]]},
+    "Test Request": {"main":[[{"node":"Analyze Result","type":"main","index":0}]]},
+    "Analyze Result": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}
