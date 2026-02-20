@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body;\n\nif (!body || !body.prompt) {\n  throw new Error('Missing required field: prompt');\n}\n\nreturn [{\n  json: {\n    prompt: body.prompt,\n    context: body.context || {},\n    options: body.options || {},\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nif (!body) {\n  throw new Error('Request body is required');\n}\n\nconst request = body.original_request || body.prompt || '';\nif (!request) {\n  throw new Error('Missing required field: original_request or prompt');\n}\n\nconst payload = {\n  customer_name: body.customer_name || 'n8n-client',\n  original_request: request,\n  ticket_summary: body.ticket_summary || request,\n  business_objective: body.business_objective || request,\n  trigger_type: body.trigger_type || 'webhook',\n  trigger_description: body.trigger_description || 'Triggered via webhook',\n  processing_steps: body.processing_steps || ['process_data via http'],\n  output_action: body.output_action || 'Return result via http',\n  expected_output: body.expected_output || 'JSON response with processed data'\n};\n\nreturn [{ json: payload }];"
       },
       "id": "validate-input",
       "name": "Validate Input",
@@ -28,37 +28,33 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.AGENTICMAKEBUILDER_URL || 'http://localhost:3000' }}/api/plan",
+        "url": "https://agenticmakebuilder-production.up.railway.app/plan",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Content-Type",
               "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $env.AGENTICMAKEBUILDER_API_KEY }}"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ prompt: $json.prompt, context: $json.context, options: $json.options }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
-          "timeout": 30000,
-          "fullResponse": true
+          "timeout": 120000
         }
       },
       "id": "http-plan-request",
       "name": "POST to AgenticMakeBuilder /plan",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [690, 300]
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const response = $input.first().json;\n\nconst plan = {\n  id: response.body?.id || `plan_${Date.now()}`,\n  status: 'completed',\n  steps: response.body?.steps || [],\n  workflow: {\n    name: response.body?.workflow?.name || 'Generated Workflow',\n    nodes: response.body?.workflow?.nodes || [],\n    connections: response.body?.workflow?.connections || {}\n  },\n  metadata: {\n    source: 'agenticmakebuilder',\n    generatedAt: new Date().toISOString(),\n    n8nHost: $env.N8N_HOST || 'localhost'\n  }\n};\n\nreturn [{ json: plan }];"
+        "jsCode": "const response = $input.first().json;\n\n// Check if this is an error response (from continueRegularOutput)\nif (response.ready_for_build === false) {\n  return [{ json: {\n    status: 'clarification_needed',\n    ready_for_build: false,\n    clarification_questions: response.clarification_questions || [],\n    hint: response.hint || 'Resubmit with structured fields',\n    metadata: { source: 'agenticmakebuilder', bridge: 'n8n', timestamp: new Date().toISOString() }\n  }}];\n}\n\nreturn [{ json: {\n  status: 'completed',\n  ready_for_build: response.ready_for_build || true,\n  delivery_report: response.delivery_report || null,\n  plan_dict: response.plan_dict || null,\n  confidence: response.confidence || {},\n  artifacts: response.artifacts || [],\n  metadata: { source: 'agenticmakebuilder', bridge: 'n8n', timestamp: new Date().toISOString() }\n}}];"
       },
       "id": "transform-response",
       "name": "Transform Response",
@@ -68,18 +64,9 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}",
+        "respondWith": "allIncomingItems",
         "options": {
-          "responseCode": 200,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              }
-            ]
-          }
+          "responseCode": 200
         }
       },
       "id": "success-response",
@@ -90,18 +77,9 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ error: true, message: $json.error?.message || 'An error occurred processing the plan request', code: 'PLAN_ERROR', timestamp: new Date().toISOString() }) }}",
+        "respondWith": "allIncomingItems",
         "options": {
-          "responseCode": 500,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              }
-            ]
-          }
+          "responseCode": 500
         }
       },
       "id": "error-response",
@@ -112,7 +90,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const error = $input.first().json;\n\nconsole.error('Plan workflow error:', JSON.stringify(error));\n\nreturn [{\n  json: {\n    error: {\n      message: error.message || 'Unknown error in plan workflow',\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+        "jsCode": "const error = $input.first().json;\n\nreturn [{\n  json: {\n    error: true,\n    message: error.message || 'Unknown error in plan workflow',\n    timestamp: new Date().toISOString()\n  }\n}];"
       },
       "id": "error-handler",
       "name": "Error Handler",
@@ -152,13 +130,6 @@
             "type": "main",
             "index": 0
           }
-        ],
-        [
-          {
-            "node": "Error Handler",
-            "type": "main",
-            "index": 0
-          }
         ]
       ]
     },
@@ -187,14 +158,5 @@
   },
   "settings": {
     "executionOrder": "v1"
-  },
-  "staticData": null,
-  "tags": [
-    {
-      "name": "manageai"
-    },
-    {
-      "name": "make-equivalent"
-    }
-  ]
+  }
 }

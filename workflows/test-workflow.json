@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{\n  json: {\n    status: 'pong',\n    message: 'n8n is running',\n    instance: $env.N8N_HOST || 'localhost',\n    timestamp: new Date().toISOString(),\n    version: 'manageai-n8n-v1'\n  }\n}];"
+        "jsCode": "return [{\n  json: {\n    status: 'pong',\n    message: 'n8n is running',\n    timestamp: new Date().toISOString(),\n    version: 'manageai-n8n-v1'\n  }\n}];"
       },
       "id": "build-pong",
       "name": "Build Pong Response",
@@ -27,18 +27,9 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}",
+        "respondWith": "allIncomingItems",
         "options": {
-          "responseCode": 200,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              }
-            ]
-          }
+          "responseCode": 200
         }
       },
       "id": "pong-response",
@@ -74,14 +65,5 @@
   },
   "settings": {
     "executionOrder": "v1"
-  },
-  "staticData": null,
-  "tags": [
-    {
-      "name": "manageai"
-    },
-    {
-      "name": "test"
-    }
-  ]
+  }
 }
