@@ -1,0 +1,24 @@
+{
+  "name": "Analytics - Usage Tracker",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "analytics/usage", "responseMode": "responseNode", "options": {} },
+      "id": "au-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "analytics-usage"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.workflow_name)throw new Error('Missing: workflow_name');\nconst now=new Date();\nconst dayKey=now.toISOString().split('T')[0];\nconst hourKey=dayKey+'-'+String(now.getUTCHours()).padStart(2,'0');\nconst weekNum=Math.ceil((now-new Date(now.getFullYear(),0,1))/(7*86400000));\nconst weekKey=now.getFullYear()+'-W'+String(weekNum).padStart(2,'0');\nconst staticData=$getWorkflowStaticData('global');\nconst stats=staticData.stats||{total_calls:0,by_workflow:{},by_persona:{},by_day:{},total_tokens:0,total_errors:0,total_exec_time_ms:0};\nstats.total_calls++;\nstats.by_workflow[body.workflow_name]=(stats.by_workflow[body.workflow_name]||0)+1;\nif(body.persona)stats.by_persona[body.persona]=(stats.by_persona[body.persona]||0)+1;\nstats.by_day[dayKey]=(stats.by_day[dayKey]||0)+1;\nif(body.status==='error')stats.total_errors++;\nstats.total_tokens+=(body.tokens_used||0);\nstats.total_exec_time_ms+=(body.execution_time_ms||0);\nstaticData.stats=stats;\nreturn [{json:{tracked:true,workflow_name:body.workflow_name,total_calls_today:stats.by_day[dayKey]||0}}];"
+      },
+      "id": "au-track", "name": "Track Usage", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "au-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Track Usage","type":"main","index":0}]]},
+    "Track Usage": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Analytics - Cost",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "GET", "path": "analytics/cost", "responseMode": "responseNode", "options": {} },
+      "id": "ac-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "analytics-cost"
+    },
+    {
+      "parameters": {
+        "method": "GET", "url": "https://agenticmakebuilder-production.up.railway.app/costs/summary",
+        "options": {"timeout":30000}
+      },
+      "id": "ac-amb", "name": "GET AMB Costs", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [470, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ambRes=$input.first().json;\nconst staticData=$getWorkflowStaticData('global');\nconst stats=staticData.stats||{total_calls:0,by_workflow:{},total_tokens:0};\nconst trackedTokens=stats.total_tokens||0;\nconst estCost=(trackedTokens*0.000002).toFixed(4);\nconst byWf=stats.by_workflow||{};\nconst costPerWf={};\nconst totalCalls=stats.total_calls||1;\nfor(const[wf,count]of Object.entries(byWf)){\n  costPerWf[wf]=(count/totalCalls*parseFloat(estCost)).toFixed(4);\n}\nreturn [{json:{\n  period:'all_time',\n  amb_reported_cost:ambRes.total_cost||ambRes.cost||0,\n  n8n_tracked_tokens:trackedTokens,\n  estimated_openai_cost:parseFloat(estCost),\n  workflows_tracked:Object.keys(byWf).length,\n  total_workflow_calls:totalCalls,\n  cost_per_workflow:costPerWf,\n  cost_trend:'stable',\n  generated_at:new Date().toISOString()\n}}];"
+      },
+      "id": "ac-build", "name": "Build Cost Report", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [690, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "ac-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [910, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"GET AMB Costs","type":"main","index":0}]]},
+    "GET AMB Costs": {"main":[[{"node":"Build Cost Report","type":"main","index":0}]]},
+    "Build Cost Report": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

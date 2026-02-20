@@ -1,0 +1,24 @@
+{
+  "name": "Analytics - Report",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "GET", "path": "analytics/report", "responseMode": "responseNode", "options": {} },
+      "id": "ar2-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "analytics-report"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const query=input.query||input.params||{};\nconst period=query.period||'all';\nconst staticData=$getWorkflowStaticData('global');\nconst stats=staticData.stats||{total_calls:0,by_workflow:{},by_persona:{},by_day:{},total_tokens:0,total_errors:0,total_exec_time_ms:0};\nconst today=new Date().toISOString().split('T')[0];\nlet totalCalls=stats.total_calls;\nlet totalErrors=stats.total_errors;\nlet byDay=stats.by_day;\nif(period==='today'){totalCalls=stats.by_day[today]||0;}\nconst errorRate=totalCalls>0?(totalErrors/stats.total_calls*100).toFixed(1):0;\nconst avgTokens=stats.total_calls>0?Math.round(stats.total_tokens/stats.total_calls):0;\nconst avgExecTime=stats.total_calls>0?Math.round(stats.total_exec_time_ms/stats.total_calls):0;\nconst byWf=stats.by_workflow||{};\nconst mostUsed=Object.entries(byWf).sort((a,b)=>b[1]-a[1])[0];\nconst byPersona=stats.by_persona||{};\nconst mostActivePersona=Object.entries(byPersona).sort((a,b)=>b[1]-a[1])[0];\nreturn [{json:{\n  period,total_calls:totalCalls,total_errors:totalErrors,error_rate:parseFloat(errorRate),\n  total_tokens:stats.total_tokens,avg_tokens_per_call:avgTokens,avg_execution_time_ms:avgExecTime,\n  most_used_workflow:mostUsed?mostUsed[0]:'none',most_active_persona:mostActivePersona?mostActivePersona[0]:'none',\n  by_workflow:byWf,by_persona:byPersona,by_day:byDay,\n  generated_at:new Date().toISOString()\n}}];"
+      },
+      "id": "ar2-report", "name": "Build Report", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "ar2-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Build Report","type":"main","index":0}]]},
+    "Build Report": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}
