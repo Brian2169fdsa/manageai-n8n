@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# ManageAI n8n — Full Interactive Demo
+# ManageAI n8n — Full Interactive Demo v3
 # Usage: bash scripts/demo.sh [BASE_URL]
 
 N8N_BASE="${1:-${N8N_BASE:-https://n8n-production-13ed.up.railway.app}}"
@@ -20,7 +20,8 @@ banner() {
   echo ""
   echo -e "${CYAN}╔═══════════════════════════════════════════╗${NC}"
   echo -e "${CYAN}║                                           ║${NC}"
-  echo -e "${CYAN}║    ${BOLD}ManageAI n8n Workflow Demo v2${NC}${CYAN}          ║${NC}"
+  echo -e "${CYAN}║    ${BOLD}ManageAI n8n Workflow Demo v3${NC}${CYAN}          ║${NC}"
+  echo -e "${CYAN}║    29 Workflows | 4 Personas | 4 Tenants  ║${NC}"
   echo -e "${CYAN}║                                           ║${NC}"
   echo -e "${CYAN}╚═══════════════════════════════════════════╝${NC}"
   echo ""
@@ -41,9 +42,8 @@ run_test() {
   local payload="${3:-}"
   local timeout="${4:-45}"
 
-  local http_code
-  local body
-  local tmpfile=$(mktemp)
+  local http_code body tmpfile
+  tmpfile=$(mktemp)
 
   if [ "$method" = "GET" ]; then
     http_code=$(curl -s -o "$tmpfile" -w "%{http_code}" --max-time "$timeout" "$url")
@@ -69,20 +69,22 @@ run_test() {
 banner
 
 # Step 1: Health
-step "1/10" "n8n Health Check"
+step "1/15" "n8n Health Check"
 run_test GET "$N8N_BASE/healthz"
 
 # Step 2: List workflows
-step "2/10" "List Active Workflows"
+step "2/15" "List Active Workflows"
 N8N_API_KEY="${N8N_API_KEY:-$(cat /tmp/n8n-api-key.txt 2>/dev/null | tr -d '\n')}"
 if [ -n "$N8N_API_KEY" ]; then
   curl -s --max-time 15 -H "X-N8N-API-KEY: $N8N_API_KEY" "$N8N_BASE/api/v1/workflows" \
     | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
-for w in data.get('data',[]):
+wfs=data.get('data',[])
+for w in sorted(wfs, key=lambda x: x['name']):
     status='Active' if w.get('active') else 'Inactive'
-    print(f'  {w[\"id\"]}  {w[\"name\"]:<40} {status}')
+    print(f'  {w[\"id\"]}  {w[\"name\"]:<42} {status}')
+print(f'\n  Total: {len(wfs)} workflows')
 " 2>/dev/null || echo "  (API key needed to list workflows)"
   ((pass++))
 else
@@ -90,45 +92,70 @@ else
 fi
 
 # Step 3: Daniel
-step "3/10" "Daniel — Sales Follow-Up (negotiation stage)"
+step "3/15" "Daniel — Sales Follow-Up (negotiation stage)"
 run_test POST "$N8N_BASE/webhook/daniel/followup" \
   '{"customer_name":"Acme Corp","company":"Acme Inc","deal_stage":"negotiation","last_interaction":"Demo call last week"}'
 
 # Step 4: Sarah
-step "4/10" "Sarah — Content Generator (blog)"
+step "4/15" "Sarah — Content Generator (blog)"
 run_test POST "$N8N_BASE/webhook/sarah/content" \
   '{"topic":"AI automation for SMBs","format":"blog","target_audience":"agency owners","tone":"conversational"}'
 
 # Step 5: Andrew
-step "5/10" "Andrew — Ops Report (weekly)"
+step "5/15" "Andrew — Ops Report (weekly)"
 run_test POST "$N8N_BASE/webhook/andrew/report" \
   '{"client_id":"demo-client-1","report_type":"weekly","include_costs":true}'
 
 # Step 6: Rebecka
-step "6/10" "Rebecka — Meeting Prep (quarterly review)"
+step "6/15" "Rebecka — Meeting Prep (quarterly review)"
 run_test POST "$N8N_BASE/webhook/rebecka/meeting" \
   '{"client_name":"TechCorp","meeting_type":"quarterly review","agenda_items":["Q4 review","Q1 planning","Roadmap discussion"],"attendees":["jane@techcorp.com","bob@techcorp.com"]}'
 
 # Step 7: Full Pipeline
-step "7/10" "Full Project Pipeline (master orchestration)"
+step "7/15" "Full Project Pipeline (master orchestration)"
 run_test POST "$N8N_BASE/webhook/project/pipeline" \
-  '{"customer_name":"Demo Corp","original_request":"Automate lead scoring from CRM data","trigger_type":"webhook","trigger_description":"New leads from HubSpot","output_action":"Return scored leads via API","expected_output":"JSON with lead scores"}' \
+  '{"customer_name":"Demo Corp","original_request":"Automate lead scoring from CRM data","trigger_type":"webhook","output_action":"Return scored leads via API"}' \
   120
 
 # Step 8: Persona Selector
-step "8/10" "Persona Selector (high urgency, sales)"
+step "8/15" "Persona Selector (high urgency, sales)"
 run_test POST "$N8N_BASE/webhook/persona/select" \
   '{"customer_name":"Demo Corp","request_type":"follow up on proposal","department":"sales","urgency":"high"}'
 
-# Step 9: Batch Briefing
-step "9/10" "Batch Briefing (2 clients)"
+# Step 9: Tenant Router
+step "9/15" "Tenant Router (cornerstone, ops report)"
+run_test POST "$N8N_BASE/webhook/tenant/route" \
+  '{"tenant_id":"cornerstone","request_type":"ops report","payload":{"client_id":"demo","report_type":"weekly"}}'
+
+# Step 10: Persona Compare
+step "10/15" "Persona Compare (all 4 respond to same prompt)"
+run_test POST "$N8N_BASE/webhook/persona/compare" \
+  '{"message":"What is the most important metric for a growing SaaS company?"}'
+
+# Step 11: Persona Chain
+step "11/15" "Persona Chain (daniel -> sarah)"
+run_test POST "$N8N_BASE/webhook/persona/chain" \
+  '{"chain":["daniel","sarah"],"initial_payload":{"customer_name":"ChainDemo","deal_stage":"discovery","topic":"Lead gen automation"}}' \
+  120
+
+# Step 12: Make.com Deploy Bridge
+step "12/15" "Make.com Deploy Bridge"
+run_test POST "$N8N_BASE/webhook/makecom/deploy" \
+  '{"project_id":"demo-project","scenario_name":"Email Automation","modules":["gmail","http","json"]}'
+
+# Step 13: Batch Briefing
+step "13/15" "Batch Briefing (2 clients)"
 run_test POST "$N8N_BASE/webhook/briefing/batch" \
   '{"client_ids":["client-alpha","client-beta"],"briefing_type":"daily"}'
 
-# Step 10: Alert Router
-step "10/10" "Alert Router (cost alert, high severity)"
+# Step 14: Alert Router
+step "14/15" "Alert Router (cost alert, high severity)"
 run_test POST "$N8N_BASE/webhook/alerts/route" \
   '{"alert_type":"cost_alert","severity":"high","project_id":"proj-demo-1","message":"Monthly cost exceeded $500 threshold"}'
+
+# Step 15: Webhook Registry
+step "15/15" "Webhook Registry List"
+run_test GET "$N8N_BASE/webhook/registry/list"
 
 # Summary
 echo ""

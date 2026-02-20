@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ManageAI n8n Workflow Manager CLI v2
+# ManageAI n8n Workflow Manager CLI v3
 # Usage: bash scripts/manage-workflows.sh <command> [options]
 
 N8N_BASE="${N8N_BASE:-https://n8n-production-13ed.up.railway.app}"
@@ -9,34 +9,45 @@ N8N_API_KEY="${N8N_API_KEY:-}"
 TIMEOUT=30
 JSON_OUTPUT=false
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 usage() {
-  echo "ManageAI n8n Workflow Manager v2"
+  echo -e "${BOLD}ManageAI n8n Workflow Manager v3${NC}"
   echo ""
   echo "Usage: $0 <command> [options]"
   echo ""
-  echo "Commands:"
+  echo "Workflow Commands:"
   echo "  list                 List all workflows"
   echo "  status               Show all workflows with execution stats"
   echo "  import <file>        Import a workflow JSON file"
   echo "  activate <id>        Activate a workflow"
   echo "  deactivate <id>      Deactivate a workflow"
   echo "  delete <id>          Delete a workflow"
-  echo "  test <webhook-path>  Test a webhook endpoint"
   echo "  sync                 Import all workflows from workflows/ directory"
   echo "  logs <workflow-id>   Show last 5 executions"
   echo "  export <workflow-id> Export workflow to workflows/exported-<id>.json"
+  echo ""
+  echo "Testing Commands:"
+  echo "  test <webhook-path>  Test a webhook endpoint"
   echo "  health               Run health check on all webhooks"
   echo "  demo                 Run full demo with sample payloads"
   echo ""
+  echo "v3 Commands:"
+  echo "  registry             List all registered webhooks"
+  echo "  errors [status]      List errors (optionally filter by open/resolved)"
+  echo "  analytics            Show workflow analytics report"
+  echo "  tenants              List all tenant configurations"
+  echo "  route <tenant> <type> Route a request via tenant router"
+  echo "  chain <p1,p2> <msg>  Chain personas sequentially"
+  echo "  compare <message>    Compare all 4 persona responses"
+  echo ""
   echo "Options:"
-  echo "  --json               Output in JSON format (for list, status)"
+  echo "  --json               Output in JSON format"
   echo "  --timeout <secs>     Request timeout in seconds (default: 30)"
   echo ""
   echo "Environment:"
@@ -68,6 +79,11 @@ api_delete() {
   curl -s --max-time "$TIMEOUT" -H "X-N8N-API-KEY: $N8N_API_KEY" -X DELETE "$N8N_BASE$1"
 }
 
+webhook_post() {
+  curl -s --max-time "$TIMEOUT" -X POST "$N8N_BASE/webhook/$1" \
+    -H "Content-Type: application/json" -d "$2"
+}
+
 cmd_list() {
   check_api_key
   local result
@@ -80,14 +96,16 @@ cmd_list() {
 
   echo -e "${CYAN}ManageAI n8n Workflows${NC}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  printf "%-18s %-35s %-8s\n" "ID" "Name" "Active"
+  printf "%-18s %-40s %-8s\n" "ID" "Name" "Active"
   echo "──────────────────────────────────────────────────────────────────"
   echo "$result" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
-for w in data.get('data', []):
-    active = '${GREEN}Yes${NC}' if w.get('active') else '${RED}No${NC}'
-    print(f\"{w['id']:<18} {w['name']:<35} {active}\")
+wfs = data.get('data', [])
+for w in sorted(wfs, key=lambda x: x['name']):
+    active = 'Yes' if w.get('active') else 'No'
+    print(f\"{w['id']:<18} {w['name'][:39]:<40} {active}\")
+print(f'\nTotal: {len(wfs)} workflows')
 " 2>/dev/null || echo "Failed to parse response"
 }
 
@@ -110,15 +128,17 @@ print(json.dumps(out, indent=2))
 
   echo -e "${CYAN}ManageAI n8n Workflow Status${NC}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  printf "%-18s %-32s %-8s %-12s\n" "ID" "Name" "Active" "Updated"
+  printf "%-18s %-35s %-8s %-12s\n" "ID" "Name" "Active" "Updated"
   echo "──────────────────────────────────────────────────────────────────────────"
   echo "$result" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
-for w in data.get('data', []):
+wfs = data.get('data', [])
+for w in sorted(wfs, key=lambda x: x['name']):
     active = 'Yes' if w.get('active') else 'No'
     updated = w.get('updatedAt', 'N/A')[:10]
-    print(f\"{w['id']:<18} {w['name'][:31]:<32} {active:<8} {updated}\")
+    print(f\"{w['id']:<18} {w['name'][:34]:<35} {active:<8} {updated}\")
+print(f'\nTotal: {len(wfs)} workflows')
 " 2>/dev/null || echo "Failed to parse response"
 }
 
@@ -160,10 +180,8 @@ cmd_delete() {
 }
 
 cmd_test() {
-  check_api_key
   local path="$1"
   local payload="${2:-{}}"
-  local start_time=$(date +%s%N 2>/dev/null || date +%s)
   local result
   result=$(curl -s --max-time "$TIMEOUT" -w "\n%{http_code}" -X POST "$N8N_BASE/webhook/$path" \
     -H "Content-Type: application/json" -d "$payload")
@@ -183,8 +201,11 @@ cmd_test() {
 
 cmd_sync() {
   check_api_key
-  local wf_dir="${2:-workflows}"
+  local wf_dir="${1:-workflows}"
   echo -e "${CYAN}Syncing workflows from $wf_dir/${NC}"
+  echo ""
+  local imported=0
+  local failed=0
 
   for file in "$wf_dir"/*.json; do
     [ -f "$file" ] || continue
@@ -192,7 +213,6 @@ cmd_sync() {
     name=$(python3 -c "import json; print(json.load(open('$file')).get('name','?'))" 2>/dev/null)
     echo -n "  $name... "
 
-    # Delete existing by name match
     local existing
     existing=$(api_get "/api/v1/workflows" | python3 -c "
 import json, sys
@@ -209,10 +229,19 @@ for w in data.get('data', []):
     new_id=$(curl -s --max-time "$TIMEOUT" -H "X-N8N-API-KEY: $N8N_API_KEY" \
       -H "Content-Type: application/json" -X POST "$N8N_BASE/api/v1/workflows" -d @"$file" \
       | python3 -c "import json,sys; print(json.load(sys.stdin).get('id','?'))" 2>/dev/null)
-    api_post "/api/v1/workflows/$new_id/activate" > /dev/null
-    echo -e "${GREEN}$new_id${NC}"
+
+    if [ "$new_id" != "?" ] && [ -n "$new_id" ]; then
+      api_post "/api/v1/workflows/$new_id/activate" > /dev/null
+      echo -e "${GREEN}$new_id${NC}"
+      ((imported++))
+    else
+      echo -e "${RED}FAILED${NC}"
+      ((failed++))
+    fi
   done
-  echo -e "${GREEN}Sync complete${NC}"
+
+  echo ""
+  echo -e "${GREEN}Sync complete:${NC} $imported imported, $failed failed"
 }
 
 cmd_logs() {
@@ -249,7 +278,7 @@ cmd_export() {
 }
 
 cmd_health() {
-  echo -e "${CYAN}Running Webhook Health Checks${NC}"
+  echo -e "${CYAN}Running Webhook Health Checks (v3 — 25 endpoints)${NC}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   local endpoints=(
@@ -259,6 +288,23 @@ cmd_health() {
     "rebecka/meeting|{\"client_name\":\"HealthCheck\",\"meeting_type\":\"test\"}"
     "project/pipeline|{\"customer_name\":\"HealthCheck\",\"original_request\":\"test\",\"trigger_type\":\"webhook\",\"output_action\":\"test\"}"
     "persona/select|{\"customer_name\":\"HealthCheck\",\"department\":\"ops\",\"urgency\":\"low\"}"
+    "makecom/deploy|{\"project_id\":\"health\",\"scenario_name\":\"test\",\"modules\":[\"http\"]}"
+    "makecom/status|{\"scenario_id\":\"health-check\"}"
+    "makecom/teardown|{\"scenario_id\":\"health-check\",\"confirm\":false}"
+    "makecom/run|{\"scenario_id\":\"health-check\"}"
+    "makecom/monitor|{}"
+    "registry/register|{\"path\":\"test/health\",\"name\":\"Health Test\",\"method\":\"POST\"}"
+    "registry/test|{\"webhook_path\":\"daniel/followup\"}"
+    "errors/capture|{\"workflow_name\":\"HealthCheck\",\"error_message\":\"test\",\"severity\":\"low\"}"
+    "errors/resolve|{\"error_id\":\"health-check-test\"}"
+    "analytics/usage|{\"workflow_name\":\"HealthCheck\",\"persona\":\"system\",\"tokens_used\":0}"
+    "tenant/route|{\"tenant_id\":\"demo\",\"request_type\":\"test\",\"payload\":{\"customer_name\":\"HealthCheck\"}}"
+    "tenant/config|{\"tenant_id\":\"demo\",\"action\":\"get\"}"
+    "persona/chain|{\"chain\":[\"daniel\"],\"initial_payload\":{\"customer_name\":\"HealthCheck\",\"deal_stage\":\"test\"}}"
+    "persona/compare|{\"message\":\"Health check test\"}"
+    "persona/memory-sync|{\"persona\":\"daniel\",\"client_id\":\"health\",\"interaction_summary\":\"test\"}"
+    "briefing/batch|{\"client_ids\":[\"health\"],\"briefing_type\":\"daily\"}"
+    "alerts/route|{\"alert_type\":\"test\",\"severity\":\"low\",\"project_id\":\"health\",\"message\":\"test\"}"
   )
 
   local pass=0
@@ -277,72 +323,139 @@ cmd_health() {
     fi
   done
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo -e "Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
+  echo -e "Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC} out of ${#endpoints[@]}"
+}
+
+cmd_registry() {
+  echo -e "${CYAN}Webhook Registry${NC}"
+  local result
+  result=$(curl -s --max-time "$TIMEOUT" "$N8N_BASE/webhook/registry/list")
+  if [ "$JSON_OUTPUT" = true ]; then
+    echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+  else
+    echo "$result" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+webhooks=data.get('webhooks',[])
+print(f'Total: {len(webhooks)} webhooks')
+print()
+for w in webhooks:
+    print(f'  {w[\"method\"]:>4} /webhook/{w[\"path\"]:<35} {w[\"name\"]}')
+" 2>/dev/null || echo "$result"
+  fi
+}
+
+cmd_errors() {
+  local status_filter="${1:-}"
+  echo -e "${CYAN}Error Queue${NC}"
+  local url="$N8N_BASE/webhook/errors/list"
+  if [ -n "$status_filter" ]; then
+    url="$url?status=$status_filter"
+  fi
+  local result
+  result=$(curl -s --max-time "$TIMEOUT" "$url")
+  if [ "$JSON_OUTPUT" = true ]; then
+    echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+  else
+    echo "$result" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+errors=data.get('errors',[])
+summary=data.get('summary',{})
+print(f'Total: {summary.get(\"total\",len(errors))} | Open: {summary.get(\"open\",\"?\")} | Resolved: {summary.get(\"resolved\",\"?\")}')
+print()
+for e in errors[:20]:
+    print(f'  [{e.get(\"severity\",\"?\"):>8}] {e.get(\"error_id\",\"?\"):<20} {e.get(\"workflow_name\",\"?\"):<25} {e.get(\"status\",\"?\")}')
+" 2>/dev/null || echo "$result"
+  fi
+}
+
+cmd_analytics() {
+  echo -e "${CYAN}Workflow Analytics Report${NC}"
+  local result
+  result=$(curl -s --max-time "$TIMEOUT" "$N8N_BASE/webhook/analytics/report")
+  if [ "$JSON_OUTPUT" = true ]; then
+    echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+  else
+    echo "$result" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+print(f'Total Calls: {data.get(\"total_calls\",0)}')
+print(f'Total Errors: {data.get(\"total_errors\",0)}')
+print(f'Error Rate: {data.get(\"error_rate\",\"N/A\")}')
+print(f'Total Tokens: {data.get(\"total_tokens\",0)}')
+print(f'Most Used: {data.get(\"most_used_workflow\",\"N/A\")}')
+print(f'Most Active Persona: {data.get(\"most_active_persona\",\"N/A\")}')
+" 2>/dev/null || echo "$result"
+  fi
+}
+
+cmd_tenants() {
+  echo -e "${CYAN}Tenant Configurations${NC}"
+  local result
+  result=$(webhook_post "tenant/config" '{"tenant_id":"any","action":"list"}')
+  if [ "$JSON_OUTPUT" = true ]; then
+    echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+  else
+    echo "$result" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+tenants=data.get('tenants',[])
+print(f'Total: {data.get(\"total\",len(tenants))} tenants')
+print()
+for t in tenants:
+    print(f'  {t[\"tenant_id\"]:<15} tier={t[\"tier\"]:<14} default={t[\"default_persona\"]}')
+" 2>/dev/null || echo "$result"
+  fi
+}
+
+cmd_route() {
+  local tenant="$1"
+  local req_type="$2"
+  local payload="${3:-{}}"
+  echo -e "${CYAN}Routing: $tenant / $req_type${NC}"
+  local result
+  result=$(webhook_post "tenant/route" "{\"tenant_id\":\"$tenant\",\"request_type\":\"$req_type\",\"payload\":$payload}")
+  echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+}
+
+cmd_chain() {
+  local personas="$1"
+  local message="$2"
+  IFS=',' read -ra persona_arr <<< "$personas"
+  local chain_json
+  chain_json=$(python3 -c "import json; print(json.dumps('$personas'.split(',')))" 2>/dev/null)
+  echo -e "${CYAN}Chaining: $personas${NC}"
+  local result
+  result=$(webhook_post "persona/chain" "{\"chain\":$chain_json,\"initial_payload\":{\"customer_name\":\"CLI\",\"topic\":\"$message\",\"client_id\":\"cli\",\"client_name\":\"CLI\"}}")
+  echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+}
+
+cmd_compare() {
+  local message="$1"
+  echo -e "${CYAN}Comparing all personas for: $message${NC}"
+  local result
+  result=$(webhook_post "persona/compare" "{\"message\":\"$message\"}")
+  echo "$result" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+comp=data.get('comparison',{})
+print(f'Most Detailed: {comp.get(\"most_detailed\",\"?\")}'  )
+print(f'Shortest: {comp.get(\"shortest\",\"?\")}')
+print()
+for p in ['daniel','sarah','andrew','rebecka']:
+    wc=comp.get('word_counts',{}).get(p,0)
+    rl=comp.get('response_lengths',{}).get(p,0)
+    print(f'  {p:<10} {wc:>5} words  ({rl} chars)')
+" 2>/dev/null || echo "$result"
 }
 
 cmd_demo() {
   echo -e "${CYAN}╔══════════════════════════════════════╗${NC}"
-  echo -e "${CYAN}║   ManageAI n8n Workflow Demo v2      ║${NC}"
+  echo -e "${CYAN}║   ManageAI n8n Workflow Demo v3      ║${NC}"
   echo -e "${CYAN}╚══════════════════════════════════════╝${NC}"
   echo ""
-
-  # Health check
-  echo -e "${YELLOW}[1/7] Health Check${NC}"
-  local hcode
-  hcode=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$N8N_BASE/healthz")
-  [ "$hcode" = "200" ] && echo -e "  ${GREEN}PASS${NC} — n8n is healthy" || echo -e "  ${RED}FAIL${NC} — HTTP $hcode"
-  echo ""
-
-  # Daniel
-  echo -e "${YELLOW}[2/7] Daniel — Sales Follow-Up${NC}"
-  curl -s --max-time 45 -X POST "$N8N_BASE/webhook/daniel/followup" \
-    -H "Content-Type: application/json" \
-    -d '{"customer_name":"Demo Corp","company":"Acme Inc","deal_stage":"negotiation"}' \
-    | python3 -m json.tool 2>/dev/null
-  echo ""
-
-  # Sarah
-  echo -e "${YELLOW}[3/7] Sarah — Content Generator${NC}"
-  curl -s --max-time 45 -X POST "$N8N_BASE/webhook/sarah/content" \
-    -H "Content-Type: application/json" \
-    -d '{"topic":"AI automation for SMBs","format":"email","target_audience":"agency owners","tone":"conversational"}' \
-    | python3 -m json.tool 2>/dev/null
-  echo ""
-
-  # Andrew
-  echo -e "${YELLOW}[4/7] Andrew — Ops Report${NC}"
-  curl -s --max-time 45 -X POST "$N8N_BASE/webhook/andrew/report" \
-    -H "Content-Type: application/json" \
-    -d '{"client_id":"demo-client-1","report_type":"weekly"}' \
-    | python3 -m json.tool 2>/dev/null
-  echo ""
-
-  # Rebecka
-  echo -e "${YELLOW}[5/7] Rebecka — Meeting Prep${NC}"
-  curl -s --max-time 45 -X POST "$N8N_BASE/webhook/rebecka/meeting" \
-    -H "Content-Type: application/json" \
-    -d '{"client_name":"TechCorp","meeting_type":"quarterly review","agenda_items":["Q4 review","Q1 planning"],"attendees":["jane@techcorp.com"]}' \
-    | python3 -m json.tool 2>/dev/null
-  echo ""
-
-  # Pipeline
-  echo -e "${YELLOW}[6/7] Full Project Pipeline${NC}"
-  curl -s --max-time 120 -X POST "$N8N_BASE/webhook/project/pipeline" \
-    -H "Content-Type: application/json" \
-    -d '{"customer_name":"Demo Corp","original_request":"Automate lead scoring from CRM","trigger_type":"webhook","output_action":"Return scored leads via API"}' \
-    | python3 -m json.tool 2>/dev/null
-  echo ""
-
-  # Persona Selector
-  echo -e "${YELLOW}[7/7] Persona Selector${NC}"
-  curl -s --max-time 45 -X POST "$N8N_BASE/webhook/persona/select" \
-    -H "Content-Type: application/json" \
-    -d '{"customer_name":"Demo Corp","request_type":"follow up","department":"sales","urgency":"high"}' \
-    | python3 -m json.tool 2>/dev/null
-  echo ""
-
-  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo -e "${GREEN}Demo complete!${NC}"
+  echo "Run: bash scripts/demo.sh"
 }
 
 # Parse global options
@@ -370,5 +483,12 @@ case "$COMMAND" in
   export)     cmd_export "$1" ;;
   health)     cmd_health ;;
   demo)       cmd_demo ;;
+  registry)   cmd_registry ;;
+  errors)     cmd_errors "${1:-}" ;;
+  analytics)  cmd_analytics ;;
+  tenants)    cmd_tenants ;;
+  route)      cmd_route "$1" "$2" "${3:-{}}" ;;
+  chain)      cmd_chain "$1" "$2" ;;
+  compare)    cmd_compare "$1" ;;
   *)          usage ;;
 esac
