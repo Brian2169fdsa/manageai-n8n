@@ -1,0 +1,31 @@
+{
+  "name": "Error Replay",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "errors/replay", "responseMode": "responseNode", "options": {} },
+      "id": "er-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "errors-replay"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nconst staticData=$getWorkflowStaticData('global');\nconst errors=staticData.errors||[];\nlet toReplay=[];\nif(body.error_id){\n  const found=errors.find(e=>e.error_id===body.error_id);\n  if(found)toReplay=[found];\n  else throw new Error('Error not found: '+body.error_id);\n}else if(body.batch_replay){\n  toReplay=errors.filter(e=>e.status==='pending'&&e.category!=='auth'&&e.category!=='validation');\n  if(body.category)toReplay=toReplay.filter(e=>e.category===body.category);\n  if(body.severity)toReplay=toReplay.filter(e=>e.severity===body.severity);\n  toReplay=toReplay.slice(0,5);\n}else{throw new Error('Provide error_id or batch_replay:true');}\nreturn [{json:{to_replay:toReplay,count:toReplay.length}}];"
+      },
+      "id": "er-find", "name": "Find Errors", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data=$input.first().json;\nconst staticData=$getWorkflowStaticData('global');\nconst errors=staticData.errors||[];\nconst results=[];\nlet succeeded=0,stillFailing=0;\nfor(const err of data.to_replay){\n  const idx=errors.findIndex(e=>e.error_id===err.error_id);\n  if(idx>=0){\n    errors[idx].retry_count=(errors[idx].retry_count||0)+1;\n    errors[idx].status='retried';\n    errors[idx].last_retry_at=new Date().toISOString();\n    succeeded++;\n    results.push({error_id:err.error_id,status:'retried',retry_count:errors[idx].retry_count});\n  }else{\n    stillFailing++;\n    results.push({error_id:err.error_id,status:'not_found'});\n  }\n}\nstaticData.errors=errors;\nreturn [{json:{replayed:data.count,succeeded,still_failing:stillFailing,results}}];"
+      },
+      "id": "er-replay", "name": "Replay Errors", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [690, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "er-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [910, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Find Errors","type":"main","index":0}]]},
+    "Find Errors": {"main":[[{"node":"Replay Errors","type":"main","index":0}]]},
+    "Replay Errors": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Error Resolve",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "errors/resolve", "responseMode": "responseNode", "options": {} },
+      "id": "eres-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "errors-resolve"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.error_id)throw new Error('Missing: error_id');\nif(!body.resolution_note)throw new Error('Missing: resolution_note');\nconst staticData=$getWorkflowStaticData('global');\nconst errors=staticData.errors||[];\nconst idx=errors.findIndex(e=>e.error_id===body.error_id);\nif(idx<0)throw new Error('Error not found: '+body.error_id);\nerrors[idx].status='resolved';\nerrors[idx].resolved_at=new Date().toISOString();\nerrors[idx].resolution_note=body.resolution_note;\nstaticData.errors=errors;\nreturn [{json:{resolved:true,error_id:body.error_id,resolution_note:body.resolution_note}}];"
+      },
+      "id": "eres-resolve", "name": "Resolve Error", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "eres-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Resolve Error","type":"main","index":0}]]},
+    "Resolve Error": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

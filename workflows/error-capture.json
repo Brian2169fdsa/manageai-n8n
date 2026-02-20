@@ -1,0 +1,24 @@
+{
+  "name": "Error Capture",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "errors/capture", "responseMode": "responseNode", "options": {} },
+      "id": "ec-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "errors-capture"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.source_workflow)throw new Error('Missing: source_workflow');\nif(!body.error_message)throw new Error('Missing: error_message');\nconst msg=(body.error_message||'').toLowerCase();\nlet category='unknown';\nif(msg.includes('timeout'))category='timeout';\nelse if(msg.includes('api')||msg.includes('401')||msg.includes('403'))category='auth';\nelse if(msg.includes('validation')||msg.includes('required')||msg.includes('missing'))category='validation';\nelse if(msg.includes('500')||msg.includes('503'))category='server_error';\nconst errorEntry={\n  error_id:'err-'+Date.now()+'-'+Math.random().toString(36).substring(2,6),\n  source_workflow:body.source_workflow,error_message:body.error_message,\n  error_code:body.error_code||null,original_payload:body.original_payload||{},\n  project_id:body.project_id||'',severity:body.severity||'medium',\n  category,retry_count:0,status:'pending',received_at:new Date().toISOString()\n};\nconst staticData=$getWorkflowStaticData('global');\nconst errors=staticData.errors||[];\nerrors.unshift(errorEntry);\nif(errors.length>100)errors.length=100;\nstaticData.errors=errors;\nreturn [{json:{captured:true,error_id:errorEntry.error_id,category,severity:errorEntry.severity,retry_eligible:category!=='auth'&&category!=='validation'}}];"
+      },
+      "id": "ec-process", "name": "Capture Error", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "ec-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Capture Error","type":"main","index":0}]]},
+    "Capture Error": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

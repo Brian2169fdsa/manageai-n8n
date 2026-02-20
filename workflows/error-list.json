@@ -1,0 +1,24 @@
+{
+  "name": "Error List",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "GET", "path": "errors/list", "responseMode": "responseNode", "options": {} },
+      "id": "el-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "errors-list"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const query=input.query||input.params||{};\nconst staticData=$getWorkflowStaticData('global');\nconst errors=staticData.errors||[];\nlet filtered=[...errors];\nconst statusFilter=(query.status||'all').toLowerCase();\nif(statusFilter!=='all')filtered=filtered.filter(e=>e.status===statusFilter);\nif(query.severity)filtered=filtered.filter(e=>e.severity===query.severity);\nif(query.category)filtered=filtered.filter(e=>e.category===query.category);\nconst limit=parseInt(query.limit)||20;\nfiltered=filtered.slice(0,limit);\nconst summary={pending:errors.filter(e=>e.status==='pending').length,retried:errors.filter(e=>e.status==='retried').length,resolved:errors.filter(e=>e.status==='resolved').length,by_category:{}};\nfor(const e of errors){summary.by_category[e.category]=(summary.by_category[e.category]||0)+1;}\nreturn [{json:{total:errors.length,filtered:filtered.length,errors:filtered,summary}}];"
+      },
+      "id": "el-list", "name": "List Errors", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "el-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"List Errors","type":"main","index":0}]]},
+    "List Errors": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}
