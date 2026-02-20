@@ -1,0 +1,77 @@
+{
+  "name": "Batch Briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "briefing/batch",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "bb-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "briefing-batch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst clientIds = body.client_ids || [];\nif (!Array.isArray(clientIds) || clientIds.length === 0) throw new Error('Missing required field: client_ids (array)');\nif (clientIds.length > 5) throw new Error('Maximum 5 client_ids allowed');\n\nconst briefingType = body.briefing_type || 'daily';\nif (!['daily', 'weekly'].includes(briefingType)) throw new Error('briefing_type must be daily or weekly');\n\n// Emit one item per client_id for SplitInBatches\nreturn clientIds.map(id => ({ json: { client_id: id, briefing_type: briefingType, total_clients: clientIds.length } }));"
+      },
+      "id": "bb-validate",
+      "name": "Validate & Split",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ persona: 'rebecka', message: 'Generate ' + $json.briefing_type + ' briefing for client ' + $json.client_id, client_id: $json.client_id }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "bb-http",
+      "name": "POST Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst briefings = items.map((item, i) => {\n  const res = item.json;\n  const clientId = $('Validate & Split').all()[i]?.json?.client_id || 'unknown-' + i;\n  const briefingType = $('Validate & Split').all()[i]?.json?.briefing_type || 'daily';\n  return {\n    client_id: clientId,\n    briefing: res.message || res.response || res.content || 'Briefing for ' + clientId,\n    briefing_type: briefingType,\n    generated_at: new Date().toISOString()\n  };\n});\n\nreturn [{ json: {\n  briefings,\n  total: briefings.length,\n  briefing_type: briefings[0]?.briefing_type || 'daily',\n  generated_at: new Date().toISOString()\n}}];"
+      },
+      "id": "bb-collect",
+      "name": "Collect Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "bb-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate & Split", "type": "main", "index": 0 }]] },
+    "Validate & Split": { "main": [[{ "node": "POST Briefing", "type": "main", "index": 0 }]] },
+    "POST Briefing": { "main": [[{ "node": "Collect Results", "type": "main", "index": 0 }]] },
+    "Collect Results": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

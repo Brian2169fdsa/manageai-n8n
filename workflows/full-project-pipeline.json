@@ -1,0 +1,211 @@
+{
+  "name": "Full Project Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "project/pipeline",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "fp-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "project-pipeline"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nif (!body.customer_name) throw new Error('Missing required field: customer_name');\nif (!body.original_request) throw new Error('Missing required field: original_request');\nif (!body.trigger_type) throw new Error('Missing required field: trigger_type');\nif (!body.output_action) throw new Error('Missing required field: output_action');\n\nconst projectId = 'proj-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);\n\nreturn [{ json: {\n  project_id: projectId,\n  customer_name: body.customer_name,\n  original_request: body.original_request,\n  ticket_summary: body.ticket_summary || body.original_request,\n  business_objective: body.business_objective || body.original_request,\n  trigger_type: body.trigger_type,\n  trigger_description: body.trigger_description || 'Triggered via webhook',\n  processing_steps: body.processing_steps || ['process_data via http'],\n  output_action: body.output_action,\n  expected_output: body.expected_output || 'JSON response with processed data'\n}}];"
+      },
+      "id": "fp-validate",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/plan",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "fp-plan",
+      "name": "Step 1 - POST Plan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst validated = $('Validate Input').first().json;\n\nconst planDict = res.plan_dict || res.plan || res;\nconst confidence = res.confidence || {};\nconst confScore = confidence.overall || confidence.score || 0;\nconst brief = res.delivery_report || res.brief || validated.original_request;\n\nreturn [{ json: {\n  project_id: validated.project_id,\n  plan_dict: planDict,\n  confidence: confidence,\n  confidence_score: confScore,\n  brief: brief,\n  ready_for_build: res.ready_for_build || false,\n  validated: validated\n}}];"
+      },
+      "id": "fp-extract-plan",
+      "name": "Extract Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "conditions": [
+            {
+              "id": "fp-conf-cond",
+              "leftValue": "={{ $json.confidence_score }}",
+              "rightValue": 0.6,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "fp-if-verify",
+      "name": "Confidence > 0.6?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/verify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ blueprint: $json.plan_dict, project_id: $json.project_id }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "fp-verify",
+      "name": "Step 2 - POST Verify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1350, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const verifyRes = $input.first().json;\nconst planData = $('Extract Plan').first().json;\n\nreturn [{ json: {\n  ...planData,\n  verification: {\n    verified: verifyRes.verified || verifyRes.passed || false,\n    confidence_score: verifyRes.confidence_score || verifyRes.score || 0,\n    issues: verifyRes.issues || []\n  },\n  auto_advanced: true\n}}];"
+      },
+      "id": "fp-verify-extract",
+      "name": "Extract Verification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1570, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const planData = $input.first().json;\n\nreturn [{ json: {\n  ...planData,\n  verification: { verified: false, confidence_score: 0, issues: ['Skipped: confidence too low'] },\n  auto_advanced: false\n}}];"
+      },
+      "id": "fp-skip-verify",
+      "name": "Skip Verification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/costs/track",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ brief: $json.brief, project_id: $json.project_id }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "fp-cost",
+      "name": "Step 3 - Cost Estimate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1790, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const costRes = $input.first().json;\nconst prev = $('Extract Verification').isValid ? $('Extract Verification').first().json : $('Skip Verification').first().json;\n\nconst costEstimate = {\n  estimated_cost_usd: costRes.estimated_cost || costRes.cost || 0,\n  token_estimate: costRes.tokens || costRes.token_estimate || 0\n};\n\nreturn [{ json: {\n  ...prev,\n  cost_estimate: costEstimate\n}}];"
+      },
+      "id": "fp-cost-extract",
+      "name": "Extract Cost",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2010, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/memory",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ project_id: $json.project_id, brief: $json.brief, outcome: 'plan_generated' }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "fp-memory",
+      "name": "Step 4 - Memory Store",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2230, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Extract Cost').first().json;\nconst memRes = $input.first().json;\n\nreturn [{ json: {\n  project_id: prev.project_id,\n  plan: prev.plan_dict,\n  verification: prev.verification,\n  cost_estimate: prev.cost_estimate,\n  next_stage: prev.auto_advanced ? 'build' : 'review',\n  pipeline_status: prev.ready_for_build ? 'ready' : 'pending_review',\n  ready_for_build: prev.ready_for_build && prev.auto_advanced,\n  memory_stored: !memRes.error,\n  created_at: new Date().toISOString()\n}}];"
+      },
+      "id": "fp-final",
+      "name": "Final Transform",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2450, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "fp-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2670, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate Input", "type": "main", "index": 0 }]] },
+    "Validate Input": { "main": [[{ "node": "Step 1 - POST Plan", "type": "main", "index": 0 }]] },
+    "Step 1 - POST Plan": { "main": [[{ "node": "Extract Plan", "type": "main", "index": 0 }]] },
+    "Extract Plan": { "main": [[{ "node": "Confidence > 0.6?", "type": "main", "index": 0 }]] },
+    "Confidence > 0.6?": {
+      "main": [
+        [{ "node": "Step 2 - POST Verify", "type": "main", "index": 0 }],
+        [{ "node": "Skip Verification", "type": "main", "index": 0 }]
+      ]
+    },
+    "Step 2 - POST Verify": { "main": [[{ "node": "Extract Verification", "type": "main", "index": 0 }]] },
+    "Extract Verification": { "main": [[{ "node": "Step 3 - Cost Estimate", "type": "main", "index": 0 }]] },
+    "Skip Verification": { "main": [[{ "node": "Step 3 - Cost Estimate", "type": "main", "index": 0 }]] },
+    "Step 3 - Cost Estimate": { "main": [[{ "node": "Extract Cost", "type": "main", "index": 0 }]] },
+    "Extract Cost": { "main": [[{ "node": "Step 4 - Memory Store", "type": "main", "index": 0 }]] },
+    "Step 4 - Memory Store": { "main": [[{ "node": "Final Transform", "type": "main", "index": 0 }]] },
+    "Final Transform": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

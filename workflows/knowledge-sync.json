@@ -1,0 +1,182 @@
+{
+  "name": "Knowledge Sync - Daily 6am",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "ks-schedule",
+      "name": "Every Day 6am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://agenticmakebuilder-production.up.railway.app/health",
+        "options": { "timeout": 15000 }
+      },
+      "id": "ks-health",
+      "name": "Step 1 - Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst isHealthy = res.status === 'ok' || res.status === 'healthy' || !res.error;\nif (!isHealthy) {\n  return [{ json: { abort: true, reason: 'System unhealthy: ' + JSON.stringify(res) } }];\n}\nreturn [{ json: { abort: false, health: res } }];"
+      },
+      "id": "ks-check",
+      "name": "Check Health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "conditions": [
+            {
+              "id": "ks-if-cond",
+              "leftValue": "={{ $json.abort }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "ks-if",
+      "name": "System Healthy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/context",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ action: 'reindex' }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "ks-reindex",
+      "name": "Step 2 - Reindex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ persona: 'rebecka', message: 'Generate daily briefing summary for all active projects' }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "ks-briefing",
+      "name": "Step 3 - Daily Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1350, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/costs/track",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ period: 'daily' }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "ks-costs",
+      "name": "Step 4 - Daily Costs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1570, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const briefingRes = $('Step 3 - Daily Briefing').first().json;\nconst costsRes = $input.first().json;\n\nconst briefing = briefingRes.message || briefingRes.response || 'No briefing generated';\nconst cost = costsRes.total_cost || costsRes.cost || 'N/A';\n\nconst summary = ':sunrise: *Daily Knowledge Sync Complete*\\n\\n' +\n  '*Briefing:* ' + briefing.substring(0, 500) + '\\n' +\n  '*Daily Cost:* $' + cost + '\\n' +\n  '*Sync Time:* ' + new Date().toISOString();\n\nreturn [{ json: { text: summary, sync_complete: true } }];"
+      },
+      "id": "ks-format",
+      "name": "Format Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1790, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.com/services/PLACEHOLDER' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "ks-slack",
+      "name": "Step 5 - POST Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2010, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'system_unhealthy_abort', checked_at: new Date().toISOString() } }];"
+      },
+      "id": "ks-abort",
+      "name": "Abort - Unhealthy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 400]
+    }
+  ],
+  "connections": {
+    "Every Day 6am": { "main": [[{ "node": "Step 1 - Health Check", "type": "main", "index": 0 }]] },
+    "Step 1 - Health Check": { "main": [[{ "node": "Check Health", "type": "main", "index": 0 }]] },
+    "Check Health": { "main": [[{ "node": "System Healthy?", "type": "main", "index": 0 }]] },
+    "System Healthy?": {
+      "main": [
+        [{ "node": "Step 2 - Reindex", "type": "main", "index": 0 }],
+        [{ "node": "Abort - Unhealthy", "type": "main", "index": 0 }]
+      ]
+    },
+    "Step 2 - Reindex": { "main": [[{ "node": "Step 3 - Daily Briefing", "type": "main", "index": 0 }]] },
+    "Step 3 - Daily Briefing": { "main": [[{ "node": "Step 4 - Daily Costs", "type": "main", "index": 0 }]] },
+    "Step 4 - Daily Costs": { "main": [[{ "node": "Format Summary", "type": "main", "index": 0 }]] },
+    "Format Summary": { "main": [[{ "node": "Step 5 - POST Slack", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

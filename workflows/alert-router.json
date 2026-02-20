@@ -1,0 +1,109 @@
+{
+  "name": "Alert Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alerts/route",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ar-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "alerts-route"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst alertType = body.alert_type;\nif (!alertType) throw new Error('Missing required field: alert_type');\n\nconst validTypes = ['cost_alert', 'stall_alert', 'build_fail', 'client_health'];\nif (!validTypes.includes(alertType)) throw new Error('Invalid alert_type. Must be: ' + validTypes.join(', '));\n\nconst severity = body.severity || 'medium';\n\n// Routing logic\nlet persona = 'daniel';\nlet webhookPath = 'daniel/followup';\nlet personaMessage = '';\n\nif (alertType === 'cost_alert' && severity === 'high') {\n  persona = 'daniel';\n  webhookPath = 'daniel/followup';\n  personaMessage = 'URGENT: Cost alert for project ' + (body.project_id || 'unknown') + '. ' + (body.message || 'Cost threshold exceeded. Draft recovery email.');\n} else if (alertType === 'stall_alert') {\n  persona = 'rebecka';\n  webhookPath = 'rebecka/meeting';\n  personaMessage = 'Stall alert for project ' + (body.project_id || 'unknown') + '. ' + (body.message || 'Project stalled. Draft status update.');\n} else if (alertType === 'build_fail') {\n  persona = 'andrew';\n  webhookPath = 'andrew/report';\n  personaMessage = 'Build failure for project ' + (body.project_id || 'unknown') + '. ' + (body.message || 'Generate incident report.');\n} else if (alertType === 'client_health' && severity === 'high') {\n  persona = 'rebecka';\n  webhookPath = 'rebecka/meeting';\n  personaMessage = 'Critical client health alert: ' + (body.project_id || 'unknown') + '. ' + (body.message || 'Draft client communication.');\n} else {\n  personaMessage = 'Alert: ' + alertType + ' - ' + (body.message || 'No details provided');\n}\n\nreturn [{ json: {\n  alert_type: alertType,\n  severity,\n  project_id: body.project_id || '',\n  message: body.message || '',\n  data: body.data || {},\n  routed_persona: persona,\n  persona_message: personaMessage\n}}];"
+      },
+      "id": "ar-route",
+      "name": "Route Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ persona: $json.routed_persona, message: $json.persona_message, project_id: $json.project_id, alert_type: $json.alert_type }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "ar-persona",
+      "name": "POST to Persona",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const personaRes = $input.first().json;\nconst routing = $('Route Alert').first().json;\n\nconst slackText = ':rotating_light: *Alert Routed: ' + routing.alert_type + '* (severity: ' + routing.severity + ')\\n' +\n  'Project: ' + (routing.project_id || 'N/A') + '\\n' +\n  'Routed to: ' + routing.routed_persona + '\\n' +\n  'Message: ' + routing.message;\n\nreturn [{ json: {\n  alert_type: routing.alert_type,\n  severity: routing.severity,\n  routed_to: routing.routed_persona,\n  persona_response: personaRes.message || personaRes.response || personaRes.content || 'Persona response received',\n  slack_text: slackText,\n  project_id: routing.project_id,\n  handled_at: new Date().toISOString()\n}}];"
+      },
+      "id": "ar-transform",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.com/services/PLACEHOLDER' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.slack_text }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "ar-slack",
+      "name": "POST Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Build Response').first().json;\nconst slackRes = $input.first().json;\nconst slackNotified = !slackRes.error && slackRes.statusCode !== 404;\n\nreturn [{ json: {\n  alert_type: prev.alert_type,\n  routed_to: prev.routed_to,\n  persona_response: prev.persona_response,\n  slack_notified: slackNotified,\n  handled_at: prev.handled_at\n}}];"
+      },
+      "id": "ar-final",
+      "name": "Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "ar-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1570, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Route Alert", "type": "main", "index": 0 }]] },
+    "Route Alert": { "main": [[{ "node": "POST to Persona", "type": "main", "index": 0 }]] },
+    "POST to Persona": { "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]] },
+    "Build Response": { "main": [[{ "node": "POST Slack", "type": "main", "index": 0 }]] },
+    "POST Slack": { "main": [[{ "node": "Final Output", "type": "main", "index": 0 }]] },
+    "Final Output": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

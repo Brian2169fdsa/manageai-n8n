@@ -1,0 +1,77 @@
+{
+  "name": "Persona Selector",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "persona/select",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ps-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "persona-select"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst customerName = body.customer_name || 'Unknown';\nconst requestType = (body.request_type || '').toLowerCase();\nconst urgency = (body.urgency || 'medium').toLowerCase();\nconst department = (body.department || '').toLowerCase();\n\nlet persona = 'daniel';\nlet reason = 'Default routing to sales persona';\n\nif (department === 'sales' || requestType.includes('follow')) {\n  persona = 'daniel';\n  reason = 'Sales department or follow-up request routed to Daniel';\n} else if (department === 'marketing' || requestType.includes('content')) {\n  persona = 'sarah';\n  reason = 'Marketing department or content request routed to Sarah';\n} else if (department === 'ops' || requestType.includes('report')) {\n  persona = 'andrew';\n  reason = 'Operations department or report request routed to Andrew';\n}\n\nif (urgency === 'high' || department === 'executive') {\n  persona = 'rebecka';\n  reason = 'High urgency or executive department routed to Rebecka';\n}\n\nconst message = customerName + ' needs help with: ' + (body.request_type || 'general request') + '. Urgency: ' + urgency + '. Department: ' + (body.department || 'unspecified');\n\nreturn [{ json: {\n  persona,\n  reason,\n  message,\n  customer_name: customerName,\n  urgency,\n  request_type: body.request_type || '',\n  department: body.department || ''\n}}];"
+      },
+      "id": "ps-select",
+      "name": "Select Persona",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ persona: $json.persona, message: $json.message, customer_name: $json.customer_name }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "ps-http",
+      "name": "POST Persona",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst selected = $('Select Persona').first().json;\n\nreturn [{ json: {\n  selected_persona: selected.persona,\n  persona_reason: selected.reason,\n  response: res.message || res.response || res.content || 'Response from ' + selected.persona,\n  customer_name: selected.customer_name,\n  urgency: selected.urgency,\n  request_type: selected.request_type,\n  department: selected.department,\n  selected_at: new Date().toISOString()\n}}];"
+      },
+      "id": "ps-transform",
+      "name": "Transform Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "ps-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Select Persona", "type": "main", "index": 0 }]] },
+    "Select Persona": { "main": [[{ "node": "POST Persona", "type": "main", "index": 0 }]] },
+    "POST Persona": { "main": [[{ "node": "Transform Response", "type": "main", "index": 0 }]] },
+    "Transform Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
