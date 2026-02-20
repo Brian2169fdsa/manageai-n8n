@@ -1,0 +1,42 @@
+{
+  "name": "Make.com Status Checker",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "makecom/status", "responseMode": "responseNode", "options": {} },
+      "id": "ms-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "makecom-status"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\nif (!body.scenario_id) throw new Error('Missing required field: scenario_id');\nreturn [{json:{scenario_id:body.scenario_id,project_id:body.project_id||''}}];"
+      },
+      "id": "ms-validate", "name": "Validate Input", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/deploy/status",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({scenario_id:$json.scenario_id}) }}",
+        "options": {"timeout":30000}
+      },
+      "id": "ms-status", "name": "GET Deploy Status", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst validated = $('Validate Input').first().json;\nconst successRate = res.success_rate || res.successRate || 0;\nlet healthScore = successRate;\nlet healthLabel = 'inactive';\nlet recommendation = 'No data available';\nif (res.total_executions > 0 || res.totalExecutions > 0) {\n  if (healthScore >= 95) { healthLabel = 'excellent'; recommendation = 'Scenario is performing well'; }\n  else if (healthScore >= 80) { healthLabel = 'good'; recommendation = 'Minor issues detected, monitor closely'; }\n  else if (healthScore >= 60) { healthLabel = 'degraded'; recommendation = 'Review recent errors and consider adjustments'; }\n  else { healthLabel = 'failing'; recommendation = 'Immediate attention required — check error logs'; }\n} else { healthScore = 0; }\nreturn [{json:{\n  scenario_id: validated.scenario_id, project_id: validated.project_id,\n  status: res.status || res.state || 'unknown',\n  active: res.active || false,\n  total_executions: res.total_executions || res.totalExecutions || 0,\n  success_rate: successRate,\n  health_score: healthScore, health_label: healthLabel, recommendation,\n  last_execution: res.last_execution || res.lastExecution || null,\n  checked_at: new Date().toISOString()\n}}];"
+      },
+      "id": "ms-analyze", "name": "Health Analysis", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [910, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "ms-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Validate Input","type":"main","index":0}]]},
+    "Validate Input": {"main":[[{"node":"GET Deploy Status","type":"main","index":0}]]},
+    "GET Deploy Status": {"main":[[{"node":"Health Analysis","type":"main","index":0}]]},
+    "Health Analysis": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

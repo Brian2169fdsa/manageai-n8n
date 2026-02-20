@@ -1,0 +1,42 @@
+{
+  "name": "Make.com Run Scenario",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "makecom/run", "responseMode": "responseNode", "options": {} },
+      "id": "mr-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "makecom-run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.scenario_id)throw new Error('Missing required field: scenario_id');\nreturn [{json:{scenario_id:body.scenario_id,data:body.data||{}}}];"
+      },
+      "id": "mr-validate", "name": "Validate Input", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/deploy/run",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({scenario_id:$json.scenario_id,data:$json.data}) }}",
+        "options": {"timeout":120000}
+      },
+      "id": "mr-run", "name": "POST Run", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res=$input.first().json;const v=$('Validate Input').first().json;\nreturn [{json:{\n  execution_id:res.execution_id||res.executionId||'exec-'+Date.now(),\n  scenario_id:v.scenario_id,\n  status:res.status||res.state||'triggered',\n  started_at:res.started_at||new Date().toISOString(),\n  track_at:'/webhook/makecom/status'\n}}];"
+      },
+      "id": "mr-transform", "name": "Build Response", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [910, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "mr-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Validate Input","type":"main","index":0}]]},
+    "Validate Input": {"main":[[{"node":"POST Run","type":"main","index":0}]]},
+    "POST Run": {"main":[[{"node":"Build Response","type":"main","index":0}]]},
+    "Build Response": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

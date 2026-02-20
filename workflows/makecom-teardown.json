@@ -1,0 +1,53 @@
+{
+  "name": "Make.com Teardown",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "makecom/teardown", "responseMode": "responseNode", "options": {} },
+      "id": "mt-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "makecom-teardown"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.scenario_id)throw new Error('Missing required field: scenario_id');\nif(!body.project_id)throw new Error('Missing required field: project_id');\nif(body.confirm!==true)throw new Error('Teardown requires explicit confirm: true');\nreturn [{json:{scenario_id:body.scenario_id,project_id:body.project_id}}];"
+      },
+      "id": "mt-validate", "name": "Validate + Confirm", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/deploy/teardown",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({scenario_id:$json.scenario_id,project_id:$json.project_id}) }}",
+        "options": {"timeout":60000}
+      },
+      "id": "mt-teardown", "name": "POST Teardown", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/persona/memory",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({project_id:$('Validate + Confirm').first().json.project_id,brief:'Scenario '+$('Validate + Confirm').first().json.scenario_id+' torn down',outcome:'teardown'}) }}",
+        "options": {"timeout":30000}
+      },
+      "id": "mt-log", "name": "Log Teardown", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [910, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const v=$('Validate + Confirm').first().json;const logRes=$input.first().json;\nreturn [{json:{torn_down:true,scenario_id:v.scenario_id,project_id:v.project_id,torn_down_at:new Date().toISOString(),logged:!logRes.error}}];"
+      },
+      "id": "mt-final", "name": "Build Response", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1130, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "mt-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1350, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Validate + Confirm","type":"main","index":0}]]},
+    "Validate + Confirm": {"main":[[{"node":"POST Teardown","type":"main","index":0}]]},
+    "POST Teardown": {"main":[[{"node":"Log Teardown","type":"main","index":0}]]},
+    "Log Teardown": {"main":[[{"node":"Build Response","type":"main","index":0}]]},
+    "Build Response": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

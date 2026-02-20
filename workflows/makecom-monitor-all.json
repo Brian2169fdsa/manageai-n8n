@@ -1,0 +1,40 @@
+{
+  "name": "Make.com Monitor All",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "makecom/monitor", "responseMode": "responseNode", "options": {} },
+      "id": "mm-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "makecom-monitor"
+    },
+    {
+      "parameters": {
+        "method": "GET", "url": "https://agenticmakebuilder-production.up.railway.app/deploy/monitor",
+        "options": {"timeout":30000}
+      },
+      "id": "mm-monitor", "name": "GET Monitor", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [470, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET", "url": "https://agenticmakebuilder-production.up.railway.app/deploy/list",
+        "options": {"timeout":30000}
+      },
+      "id": "mm-list", "name": "GET Deploy List", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const monitorRes=$('GET Monitor').first().json;\nconst listRes=$input.first().json;\nconst scenarios=listRes.scenarios||listRes.deployments||listRes.data||[];\nconst scenarioList=Array.isArray(scenarios)?scenarios:[];\nlet healthy=0,degraded=0,failing=0,inactive=0;\nconst alerts=[],warnings=[];\nfor(const s of scenarioList){\n  const h=s.health||s.health_label||'inactive';\n  if(h==='excellent'||h==='good')healthy++;\n  else if(h==='degraded'){degraded++;warnings.push(s.scenario_name||s.id);}\n  else if(h==='failing'){failing++;alerts.push(s.scenario_name||s.id);}\n  else inactive++;\n}\nconst total=scenarioList.length||monitorRes.total||0;\nconst summaryText=':satellite: Make.com Monitor: '+total+' scenarios — '+healthy+' healthy, '+degraded+' degraded, '+failing+' failing, '+inactive+' inactive';\nreturn [{json:{\n  monitored_at:new Date().toISOString(),total:total||healthy+degraded+failing+inactive,\n  healthy,degraded,failing,inactive,\n  alerts,warnings,scenarios:scenarioList.slice(0,20),summary_text:summaryText\n}}];"
+      },
+      "id": "mm-summary", "name": "Build Summary", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [910, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "mm-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"GET Monitor","type":"main","index":0}]]},
+    "GET Monitor": {"main":[[{"node":"GET Deploy List","type":"main","index":0}]]},
+    "GET Deploy List": {"main":[[{"node":"Build Summary","type":"main","index":0}]]},
+    "Build Summary": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

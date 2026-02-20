@@ -1,0 +1,71 @@
+{
+  "name": "Make.com Deploy Bridge",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "makecom/deploy", "responseMode": "responseNode", "options": {} },
+      "id": "md-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "makecom-deploy"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\nconst missing = [];\nif (!body.project_id) missing.push('project_id');\nif (!body.scenario_name) missing.push('scenario_name');\nif (!body.blueprint) missing.push('blueprint');\nif (missing.length > 0) throw new Error(JSON.stringify({error:'Missing required fields',required:missing}));\nreturn [{json:{project_id:body.project_id,scenario_name:body.scenario_name,blueprint:body.blueprint,activate:body.activate!==false}}];"
+      },
+      "id": "md-validate", "name": "Validate Input", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/deploy/makecom",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({project_id:$json.project_id,blueprint:$json.blueprint,scenario_name:$json.scenario_name,activate:$json.activate}) }}",
+        "options": {"timeout":120000}
+      },
+      "id": "md-deploy", "name": "POST Deploy", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst validated = $('Validate Input').first().json;\nlet status='failed',scenario_id='',make_url='',hook_url='';\nif(res.deployed===true){status='deployed';scenario_id=res.scenario_id||'';make_url=res.make_url||'';hook_url=res.hook_url||'';}\nelse if(res.simulation===true||res.simulated===true){status='simulation';}\nelse if(res.error){status='failed';}\nelse{status='simulation';}\nreturn [{json:{...validated,status,scenario_id,make_url,hook_url,deploy_response:res}}];"
+      },
+      "id": "md-check", "name": "Check Deploy Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/persona/context",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({project_id:$json.project_id,current_stage:'build',next_stage:'deploy'}) }}",
+        "options": {"timeout":30000}
+      },
+      "id": "md-advance", "name": "Advance Pipeline", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1130, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/persona/memory",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({project_id:$('Check Deploy Result').first().json.project_id,brief:'Deployed scenario '+$('Check Deploy Result').first().json.scenario_name,outcome:$('Check Deploy Result').first().json.status}) }}",
+        "options": {"timeout":30000}
+      },
+      "id": "md-memory", "name": "Store Activity", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1350, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const deploy = $('Check Deploy Result').first().json;\nconst advanceRes = $('Advance Pipeline').first().json;\nconst memRes = $input.first().json;\nreturn [{json:{\n  project_id:deploy.project_id,scenario_name:deploy.scenario_name,status:deploy.status,\n  scenario_id:deploy.scenario_id,make_url:deploy.make_url,hook_url:deploy.hook_url,\n  activated:deploy.activate,pipeline_advanced:!advanceRes.error,memory_stored:!memRes.error,\n  deployed_at:new Date().toISOString(),\n  next_action:deploy.status==='deployed'?'Monitor at /webhook/makecom/status':'Configure MAKECOM_API_KEY in Railway env'\n}}];"
+      },
+      "id": "md-final", "name": "Transform Final", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1570, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "md-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1790, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Validate Input","type":"main","index":0}]]},
+    "Validate Input": {"main":[[{"node":"POST Deploy","type":"main","index":0}]]},
+    "POST Deploy": {"main":[[{"node":"Check Deploy Result","type":"main","index":0}]]},
+    "Check Deploy Result": {"main":[[{"node":"Advance Pipeline","type":"main","index":0}]]},
+    "Advance Pipeline": {"main":[[{"node":"Store Activity","type":"main","index":0}]]},
+    "Store Activity": {"main":[[{"node":"Transform Final","type":"main","index":0}]]},
+    "Transform Final": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}
