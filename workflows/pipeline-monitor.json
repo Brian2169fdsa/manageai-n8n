@@ -4,132 +4,93 @@
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+          "interval": [{"field":"hours","hoursInterval":1}]
         }
       },
-      "id": "pm-schedule",
-      "name": "Every Hour",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [250, 300]
+      "id": "pm-schedule", "name": "Every Hour", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [250, 300]
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "https://agenticmakebuilder-production.up.railway.app/supervisor/stalled",
-        "options": { "timeout": 30000 }
+        "jsCode": "const sd=$getWorkflowStaticData('global');if(!sd.checks)sd.checks=[];if(!sd.total_checks)sd.total_checks=0;sd.total_checks++;sd.checks.push({check_id:sd.total_checks,started_at:new Date().toISOString()});if(sd.checks.length>48)sd.checks=sd.checks.slice(-48);return [{json:{check_id:sd.total_checks}}];"
       },
-      "id": "pm-stalled",
-      "name": "GET Stalled Projects",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [470, 300],
-      "onError": "continueRegularOutput"
+      "id": "pm-track", "name": "Track Check", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.first().json;\n\nconst stalled = res.stalled || res.projects || res.data || [];\nconst stalledList = Array.isArray(stalled) ? stalled : [];\nconst count = stalledList.length;\n\nif (count === 0) {\n  return [{ json: { stalled_count: 0, should_alert: false, summary: 'No stalled projects.' } }];\n}\n\nconst lines = stalledList.map((p, i) => {\n  const name = p.name || p.customer_name || p.id || 'Unknown';\n  const lastUpdate = p.last_update || p.updated_at || 'N/A';\n  return '  ' + (i + 1) + '. ' + name + ' (last update: ' + lastUpdate + ')';\n});\n\nconst summary = ':warning: *Pipeline Alert — ' + count + ' Stalled Project' + (count > 1 ? 's' : '') + '*\\n\\n' + lines.join('\\n') + '\\n\\n_Auto-detected by ManageAI Pipeline Monitor_';\n\nreturn [{ json: {\n  stalled_count: count,\n  should_alert: true,\n  summary,\n  stalled_projects: stalledList,\n  checked_at: new Date().toISOString()\n}}];"
+        "method": "GET", "url": "https://agenticmakebuilder-production.up.railway.app/supervisor/stalled",
+        "options": {"timeout":30000}
       },
-      "id": "pm-analyze",
-      "name": "Build Alert",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [690, 300]
+      "id": "pm-stalled", "name": "GET Stalled Projects", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET", "url": "https://agenticmakebuilder-production.up.railway.app/health",
+        "options": {"timeout":15000}
+      },
+      "id": "pm-health", "name": "GET AMB Health", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [910, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const stalledRes=$('GET Stalled Projects').first().json;const healthRes=$input.first().json;const stalled=stalledRes.stalled||stalledRes.projects||stalledRes.data||[];const stalledList=Array.isArray(stalled)?stalled:[];const count=stalledList.length;const ambHealthy=healthRes.status==='ok'||healthRes.status==='healthy'||!healthRes.error;const sd=$getWorkflowStaticData('global');const lastCheck=sd.checks&&sd.checks.length?sd.checks[sd.checks.length-1]:null;if(lastCheck){lastCheck.stalled_count=count;lastCheck.amb_healthy=ambHealthy;lastCheck.completed_at=new Date().toISOString();}if(!sd.alert_history)sd.alert_history=[];if(count===0&&ambHealthy){return [{json:{stalled_count:0,should_alert:false,amb_healthy:true,summary:'No stalled projects. AMB healthy.',total_checks:sd.total_checks}}];}const lines=stalledList.map((p,i)=>{const name=p.name||p.customer_name||p.id||'Unknown';const lastUpdate=p.last_update||p.updated_at||'N/A';return '  '+(i+1)+'. '+name+' (last update: '+lastUpdate+')';});let summary=':warning: *Pipeline Alert — '+count+' Stalled Project'+(count>1?'s':'')+' *\\n';if(!ambHealthy)summary+=':red_circle: *AMB System Unhealthy*\\n';summary+='\\n'+lines.join('\\n')+'\\n\\n_Auto-detected by ManageAI Pipeline Monitor (check #'+sd.total_checks+')_';sd.alert_history.push({at:new Date().toISOString(),stalled:count,amb_healthy:ambHealthy});if(sd.alert_history.length>50)sd.alert_history=sd.alert_history.slice(-50);return [{json:{stalled_count:count,should_alert:true,amb_healthy:ambHealthy,summary,stalled_projects:stalledList,checked_at:new Date().toISOString(),total_checks:sd.total_checks}}];"
+      },
+      "id": "pm-analyze", "name": "Build Alert", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1130, 300]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "" },
-          "conditions": [
-            {
-              "id": "pm-if-cond",
-              "leftValue": "={{ $json.should_alert }}",
-              "rightValue": true,
-              "operator": { "type": "boolean", "operation": "equals" }
-            }
-          ],
+          "options": {"caseSensitive":true,"leftValue":""},
+          "conditions": [{"id":"pm-if-cond","leftValue":"={{ $json.should_alert }}","rightValue":true,"operator":{"type":"boolean","operation":"equals"}}],
           "combinator": "and"
         }
       },
-      "id": "pm-if",
-      "name": "Has Stalled?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [910, 300]
+      "id": "pm-if", "name": "Has Stalled?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [1350, 300]
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://agenticmakebuilder-production.up.railway.app/briefing/daily",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ stalled_projects: $json.stalled_projects, stalled_count: $json.stalled_count }) }}",
-        "options": { "timeout": 30000 }
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/briefing/daily",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({stalled_projects:$json.stalled_projects,stalled_count:$json.stalled_count}) }}",
+        "options": {"timeout":30000}
       },
-      "id": "pm-briefing",
-      "name": "POST Daily Briefing",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1130, 200],
-      "onError": "continueRegularOutput"
+      "id": "pm-briefing", "name": "POST Daily Briefing", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1570, 200], "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const alert = $('Build Alert').first().json;\nconst briefing = $input.first().json;\n\nreturn [{ json: {\n  text: alert.summary\n}}];"
+        "jsCode": "const alert=$('Build Alert').first().json;return [{json:{text:alert.summary}}];"
       },
-      "id": "pm-format-slack",
-      "name": "Format Slack Payload",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1350, 200]
+      "id": "pm-format-slack", "name": "Format Slack Payload", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1790, 200]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.com/services/PLACEHOLDER' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
-        "options": { "timeout": 10000 }
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({text:$json.text}) }}",
+        "options": {"timeout":10000}
       },
-      "id": "pm-slack",
-      "name": "POST Slack Alert",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1570, 200],
-      "onError": "continueRegularOutput"
+      "id": "pm-slack", "name": "POST Slack Alert", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [2010, 200], "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { status: 'no_stalled_projects', checked_at: new Date().toISOString() } }];"
+        "jsCode": "return [{json:{status:'no_stalled_projects',checked_at:new Date().toISOString()}}];"
       },
-      "id": "pm-noop",
-      "name": "No Alert Needed",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1130, 400]
+      "id": "pm-noop", "name": "No Alert Needed", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1570, 400]
     }
   ],
   "connections": {
-    "Every Hour": { "main": [[{ "node": "GET Stalled Projects", "type": "main", "index": 0 }]] },
-    "GET Stalled Projects": { "main": [[{ "node": "Build Alert", "type": "main", "index": 0 }]] },
-    "Build Alert": { "main": [[{ "node": "Has Stalled?", "type": "main", "index": 0 }]] },
-    "Has Stalled?": {
-      "main": [
-        [{ "node": "POST Daily Briefing", "type": "main", "index": 0 }],
-        [{ "node": "No Alert Needed", "type": "main", "index": 0 }]
-      ]
-    },
-    "POST Daily Briefing": { "main": [[{ "node": "Format Slack Payload", "type": "main", "index": 0 }]] },
-    "Format Slack Payload": { "main": [[{ "node": "POST Slack Alert", "type": "main", "index": 0 }]] }
+    "Every Hour": {"main":[[{"node":"Track Check","type":"main","index":0}]]},
+    "Track Check": {"main":[[{"node":"GET Stalled Projects","type":"main","index":0}]]},
+    "GET Stalled Projects": {"main":[[{"node":"GET AMB Health","type":"main","index":0}]]},
+    "GET AMB Health": {"main":[[{"node":"Build Alert","type":"main","index":0}]]},
+    "Build Alert": {"main":[[{"node":"Has Stalled?","type":"main","index":0}]]},
+    "Has Stalled?": {"main":[
+      [{"node":"POST Daily Briefing","type":"main","index":0}],
+      [{"node":"No Alert Needed","type":"main","index":0}]
+    ]},
+    "POST Daily Briefing": {"main":[[{"node":"Format Slack Payload","type":"main","index":0}]]},
+    "Format Slack Payload": {"main":[[{"node":"POST Slack Alert","type":"main","index":0}]]}
   },
-  "settings": { "executionOrder": "v1" }
+  "settings": {"executionOrder":"v1"}
 }
