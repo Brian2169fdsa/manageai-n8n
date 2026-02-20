@@ -48,7 +48,7 @@
       "name": "GET Pipeline Dashboard",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [690, 500],
+      "position": [910, 300],
       "onError": "continueRegularOutput"
     },
     {
@@ -61,18 +61,18 @@
       "name": "GET Client Health",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [690, 700],
+      "position": [1130, 300],
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const costData = $('GET Cost Summary').first().json || {};\nconst pipelineData = $('GET Pipeline Dashboard').first().json || {};\nconst healthData = $('GET Client Health').first().json || {};\nconst validated = $('Validate Input').first().json;\n\nconst dataSources = [];\nif (!costData.error && !costData.statusCode) dataSources.push('costs');\nif (!pipelineData.error && !pipelineData.statusCode) dataSources.push('pipeline');\nif (!healthData.error && !healthData.statusCode) dataSources.push('client_health');\n\nreturn [{ json: {\n  persona: 'andrew',\n  client_id: validated.client_id,\n  report_type: validated.report_type,\n  include_costs: validated.include_costs,\n  cost_data: costData,\n  pipeline_data: pipelineData,\n  health_data: healthData,\n  data_sources: dataSources\n}}];"
+        "jsCode": "const costData = $('GET Cost Summary').first().json || {};\nconst pipelineData = $('GET Pipeline Dashboard').first().json || {};\nconst healthData = $input.first().json || {};\nconst validated = $('Validate Input').first().json;\n\nconst dataSources = [];\nif (!costData.error && !costData.statusCode) dataSources.push('costs');\nif (!pipelineData.error && !pipelineData.statusCode) dataSources.push('pipeline');\nif (!healthData.error && !healthData.statusCode) dataSources.push('client_health');\n\nconst message = 'Generate ' + validated.report_type + ' operations report for client ' + validated.client_id + '. Include analysis of costs, pipeline status, and client health.';\n\nreturn [{ json: {\n  persona: 'andrew',\n  message: message,\n  client_id: validated.client_id,\n  report_type: validated.report_type,\n  include_costs: validated.include_costs,\n  cost_data: costData,\n  pipeline_data: pipelineData,\n  health_data: healthData,\n  data_sources: dataSources\n}}];"
       },
       "id": "a1-merge",
       "name": "Merge All Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [960, 500]
+      "position": [1350, 300]
     },
     {
       "parameters": {
@@ -91,7 +91,7 @@
       "name": "POST Persona Andrew",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1200, 500],
+      "position": [1570, 300],
       "onError": "continueRegularOutput"
     },
     {
@@ -102,7 +102,7 @@
       "name": "Build Report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1440, 500]
+      "position": [1790, 300]
     },
     {
       "parameters": {
@@ -113,18 +113,14 @@
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1680, 500]
+      "position": [2010, 300]
     }
   ],
   "connections": {
     "Webhook Trigger": { "main": [[{ "node": "Validate Input", "type": "main", "index": 0 }]] },
-    "Validate Input": { "main": [
-      [{ "node": "GET Cost Summary", "type": "main", "index": 0 }],
-      [{ "node": "GET Pipeline Dashboard", "type": "main", "index": 0 }],
-      [{ "node": "GET Client Health", "type": "main", "index": 0 }]
-    ]},
-    "GET Cost Summary": { "main": [[{ "node": "Merge All Data", "type": "main", "index": 0 }]] },
-    "GET Pipeline Dashboard": { "main": [[{ "node": "Merge All Data", "type": "main", "index": 0 }]] },
+    "Validate Input": { "main": [[{ "node": "GET Cost Summary", "type": "main", "index": 0 }]] },
+    "GET Cost Summary": { "main": [[{ "node": "GET Pipeline Dashboard", "type": "main", "index": 0 }]] },
+    "GET Pipeline Dashboard": { "main": [[{ "node": "GET Client Health", "type": "main", "index": 0 }]] },
     "GET Client Health": { "main": [[{ "node": "Merge All Data", "type": "main", "index": 0 }]] },
     "Merge All Data": { "main": [[{ "node": "POST Persona Andrew", "type": "main", "index": 0 }]] },
     "POST Persona Andrew": { "main": [[{ "node": "Build Report", "type": "main", "index": 0 }]] },

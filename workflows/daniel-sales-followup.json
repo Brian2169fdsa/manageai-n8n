@@ -35,7 +35,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ persona: 'daniel', customer_name: $json.customer_name, company: $json.company, last_interaction: $json.last_interaction, deal_stage: $json.deal_stage }) }}",
+        "jsonBody": "={{ JSON.stringify({ persona: 'daniel', message: 'Generate sales follow-up for ' + $json.customer_name + ' at ' + ($json.company || 'their company') + '. Deal stage: ' + $json.deal_stage + '. Last interaction: ' + ($json.last_interaction || 'none'), customer_name: $json.customer_name, company: $json.company, last_interaction: $json.last_interaction, deal_stage: $json.deal_stage }) }}",
         "options": { "timeout": 60000 }
       },
       "id": "d1-http",
@@ -96,7 +96,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ persona: 'daniel', customer_name: $json.customer_name, company: $json.company, last_interaction: $json.last_interaction, deal_stage: $json.deal_stage }) }}",
+        "jsonBody": "={{ JSON.stringify({ persona: 'daniel', message: 'Generate sales follow-up for ' + $json.customer_name + ' at ' + ($json.company || 'their company') + '. Deal stage: ' + $json.deal_stage, customer_name: $json.customer_name, company: $json.company, last_interaction: $json.last_interaction, deal_stage: $json.deal_stage }) }}",
         "options": { "timeout": 60000 }
       },
       "id": "d1-http-retry",

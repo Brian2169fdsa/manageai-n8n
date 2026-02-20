@@ -35,7 +35,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ persona: 'sarah', topic: $json.topic, format: $json.format, target_audience: $json.target_audience, tone: $json.tone }) }}",
+        "jsonBody": "={{ JSON.stringify({ persona: 'sarah', message: 'Create ' + $json.format + ' content about: ' + $json.topic + '. Target audience: ' + $json.target_audience + '. Tone: ' + $json.tone, topic: $json.topic, format: $json.format, target_audience: $json.target_audience, tone: $json.tone }) }}",
         "options": { "timeout": 60000 }
       },
       "id": "s1-http",
