@@ -1,0 +1,87 @@
+{
+  "name": "ManageAI - Ping/Pong Test",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "ping",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ping-trigger",
+      "name": "Ping Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "ping-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    status: 'pong',\n    message: 'n8n is running',\n    instance: $env.N8N_HOST || 'localhost',\n    timestamp: new Date().toISOString(),\n    version: 'manageai-n8n-v1'\n  }\n}];"
+      },
+      "id": "build-pong",
+      "name": "Build Pong Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "pong-response",
+      "name": "Respond Pong",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Ping Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Pong Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Pong Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Pong",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "manageai"
+    },
+    {
+      "name": "test"
+    }
+  ]
+}
