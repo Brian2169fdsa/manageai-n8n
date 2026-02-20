@@ -1,0 +1,200 @@
+{
+  "name": "ManageAI - Make Equivalent Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "plan",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "plan-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\n\nif (!body || !body.prompt) {\n  throw new Error('Missing required field: prompt');\n}\n\nreturn [{\n  json: {\n    prompt: body.prompt,\n    context: body.context || {},\n    options: body.options || {},\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENTICMAKEBUILDER_URL || 'http://localhost:3000' }}/api/plan",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AGENTICMAKEBUILDER_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ prompt: $json.prompt, context: $json.context, options: $json.options }) }}",
+        "options": {
+          "timeout": 30000,
+          "fullResponse": true
+        }
+      },
+      "id": "http-plan-request",
+      "name": "POST to AgenticMakeBuilder /plan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nconst plan = {\n  id: response.body?.id || `plan_${Date.now()}`,\n  status: 'completed',\n  steps: response.body?.steps || [],\n  workflow: {\n    name: response.body?.workflow?.name || 'Generated Workflow',\n    nodes: response.body?.workflow?.nodes || [],\n    connections: response.body?.workflow?.connections || {}\n  },\n  metadata: {\n    source: 'agenticmakebuilder',\n    generatedAt: new Date().toISOString(),\n    n8nHost: $env.N8N_HOST || 'localhost'\n  }\n};\n\nreturn [{ json: plan }];"
+      },
+      "id": "transform-response",
+      "name": "Transform Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "success-response",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: true, message: $json.error?.message || 'An error occurred processing the plan request', code: 'PLAN_ERROR', timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "error-response",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1130, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "const error = $input.first().json;\n\nconsole.error('Plan workflow error:', JSON.stringify(error));\n\nreturn [{\n  json: {\n    error: {\n      message: error.message || 'Unknown error in plan workflow',\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 520]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "POST to AgenticMakeBuilder /plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST to AgenticMakeBuilder /plan": {
+      "main": [
+        [
+          {
+            "node": "Transform Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "manageai"
+    },
+    {
+      "name": "make-equivalent"
+    }
+  ]
+}
