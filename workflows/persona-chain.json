@@ -1,0 +1,88 @@
+{
+  "name": "Persona Chain",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "persona/chain", "responseMode": "responseNode", "options": {} },
+      "id": "pc-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "persona-chain"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.chain||!Array.isArray(body.chain)||body.chain.length<1||body.chain.length>3)throw new Error('chain must be array of 1-3 persona names');\nif(!body.initial_payload)throw new Error('Missing: initial_payload');\nconst valid=['daniel','sarah','andrew','rebecka'];\nfor(const p of body.chain){if(!valid.includes(p))throw new Error('Invalid persona: '+p);}\nreturn [{json:{chain:body.chain,initial_payload:body.initial_payload,project_id:body.project_id||''}}];"
+      },
+      "id": "pc-validate", "name": "Validate Input", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const v=$input.first().json;\nconst WEBHOOKS={daniel:'/webhook/daniel/followup',sarah:'/webhook/sarah/content',andrew:'/webhook/andrew/report',rebecka:'/webhook/rebecka/meeting'};\nconst persona=v.chain[0];\nconst webhook=WEBHOOKS[persona];\nconst payload={...v.initial_payload};\nif(persona==='daniel'&&!payload.customer_name)payload.customer_name=v.project_id||'ChainClient';\nif(persona==='sarah'&&!payload.topic)payload.topic='Chain request';\nif(persona==='andrew'&&!payload.client_id)payload.client_id=v.project_id||'chain-client';\nif(persona==='rebecka'&&!payload.client_name)payload.client_name=v.project_id||'ChainClient';\nreturn [{json:{chain:v.chain,project_id:v.project_id,webhook,persona,payload,step:0,results:[]}}];"
+      },
+      "id": "pc-prep1", "name": "Prep Step 1", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "=https://n8n-production-13ed.up.railway.app{{ $json.webhook }}",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {"timeout":60000}
+      },
+      "id": "pc-http1", "name": "Call Step 1", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [910, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res=$input.first().json;const prev=$('Prep Step 1').first().json;\nconst resData=Array.isArray(res)?res[0]:res;\nprev.results.push({persona:prev.persona,output:resData});\nif(prev.chain.length<=1){\n  return [{json:{chain_executed:prev.chain,project_id:prev.project_id,results:prev.results,final_output:resData,chain_complete:true,completed_at:new Date().toISOString()}}];\n}\nconst WEBHOOKS={daniel:'/webhook/daniel/followup',sarah:'/webhook/sarah/content',andrew:'/webhook/andrew/report',rebecka:'/webhook/rebecka/meeting'};\nconst persona2=prev.chain[1];\nconst payload2={...prev.results[0].output};\nif(persona2==='daniel'&&!payload2.customer_name)payload2.customer_name='ChainClient';\nif(persona2==='sarah'&&!payload2.topic)payload2.topic=JSON.stringify(resData).substring(0,100);\nif(persona2==='andrew'&&!payload2.client_id)payload2.client_id='chain-client';\nif(persona2==='rebecka'&&!payload2.client_name)payload2.client_name='ChainClient';\nreturn [{json:{...prev,webhook2:WEBHOOKS[persona2],persona2,payload2,chain_complete:false}}];"
+      },
+      "id": "pc-merge1", "name": "Process Step 1", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive":true,"leftValue":""},
+          "conditions": [{"id":"pc-if-cond","leftValue":"={{ $json.chain_complete }}","rightValue":true,"operator":{"type":"boolean","operation":"equals"}}],
+          "combinator": "and"
+        }
+      },
+      "id": "pc-if-done", "name": "Chain Complete?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d=$input.first().json;\nreturn [{json:{chain_executed:d.chain_executed,project_id:d.project_id,results:d.results,final_output:d.final_output,chain_summary:d.chain_executed.length+' persona(s) executed',completed_at:d.completed_at}}];"
+      },
+      "id": "pc-done", "name": "Chain Done", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1570, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "=https://n8n-production-13ed.up.railway.app{{ $json.webhook2 }}",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload2) }}",
+        "options": {"timeout":60000}
+      },
+      "id": "pc-http2", "name": "Call Step 2", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1570, 400], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const res=$input.first().json;const prev=$('Process Step 1').first().json;\nconst resData=Array.isArray(res)?res[0]:res;\nprev.results.push({persona:prev.persona2,output:resData});\nreturn [{json:{chain_executed:prev.chain,project_id:prev.project_id,results:prev.results,final_output:resData,chain_summary:prev.results.length+' persona(s) executed',completed_at:new Date().toISOString()}}];"
+      },
+      "id": "pc-merge2", "name": "Process Step 2", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1790, 400]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "pc-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [2010, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Validate Input","type":"main","index":0}]]},
+    "Validate Input": {"main":[[{"node":"Prep Step 1","type":"main","index":0}]]},
+    "Prep Step 1": {"main":[[{"node":"Call Step 1","type":"main","index":0}]]},
+    "Call Step 1": {"main":[[{"node":"Process Step 1","type":"main","index":0}]]},
+    "Process Step 1": {"main":[[{"node":"Chain Complete?","type":"main","index":0}]]},
+    "Chain Complete?": {"main":[
+      [{"node":"Chain Done","type":"main","index":0}],
+      [{"node":"Call Step 2","type":"main","index":0}]
+    ]},
+    "Chain Done": {"main":[[{"node":"Respond","type":"main","index":0}]]},
+    "Call Step 2": {"main":[[{"node":"Process Step 2","type":"main","index":0}]]},
+    "Process Step 2": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}

@@ -1,0 +1,53 @@
+{
+  "name": "Persona Memory Sync",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "persona/memory-sync", "responseMode": "responseNode", "options": {} },
+      "id": "pms-webhook", "name": "Webhook Trigger", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [250, 300], "webhookId": "persona-memory-sync"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json;const body=input.body||input;\nif(!body.persona)throw new Error('Missing: persona');\nif(!body.client_id)throw new Error('Missing: client_id');\nif(!body.interaction_summary)throw new Error('Missing: interaction_summary');\nreturn [{json:{persona:body.persona,client_id:body.client_id,interaction_summary:body.interaction_summary,rating:body.rating||3,outcome:body.outcome||'completed'}}];"
+      },
+      "id": "pms-validate", "name": "Validate Input", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({persona:$json.persona,message:$json.interaction_summary,client_id:$json.client_id}) }}",
+        "options": {"timeout":60000}
+      },
+      "id": "pms-context", "name": "Update Context", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [690, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "https://agenticmakebuilder-production.up.railway.app/persona/memory",
+        "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({project_id:$('Validate Input').first().json.client_id,brief:$('Validate Input').first().json.persona+': '+$('Validate Input').first().json.interaction_summary,outcome:'rating_'+$('Validate Input').first().json.rating}) }}",
+        "options": {"timeout":30000}
+      },
+      "id": "pms-memory", "name": "Embed Memory", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [910, 300], "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const v=$('Validate Input').first().json;const ctxRes=$('Update Context').first().json;const memRes=$input.first().json;\nreturn [{json:{synced:true,persona:v.persona,client_id:v.client_id,memory_stored:!memRes.error,context_updated:!ctxRes.error,synced_at:new Date().toISOString()}}];"
+      },
+      "id": "pms-final", "name": "Build Response", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1130, 300]
+    },
+    {
+      "parameters": { "respondWith": "allIncomingItems", "options": {"responseCode":200} },
+      "id": "pms-respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1350, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Validate Input","type":"main","index":0}]]},
+    "Validate Input": {"main":[[{"node":"Update Context","type":"main","index":0}]]},
+    "Update Context": {"main":[[{"node":"Embed Memory","type":"main","index":0}]]},
+    "Embed Memory": {"main":[[{"node":"Build Response","type":"main","index":0}]]},
+    "Build Response": {"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "settings": {"executionOrder":"v1"}
+}
