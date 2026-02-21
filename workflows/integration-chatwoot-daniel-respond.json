@@ -1,0 +1,150 @@
+{
+  "name": "Integration: Chatwoot → Daniel Auto-Respond",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "integration/chatwoot-respond",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "cd-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "chatwoot-daniel-respond"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\n// Chatwoot webhook payload structure\nconst event = body.event || '';\nconst messageType = body.message_type || body.content_type || '';\nconst content = body.content || body.message || '';\nconst conversationId = body.conversation_id || (body.conversation && body.conversation.id) || '';\nconst contactName = body.sender && body.sender.name || body.contact_name || body.customer_name || 'Unknown';\nconst contactEmail = body.sender && body.sender.email || body.contact_email || '';\nconst accountId = body.account && body.account.id || body.account_id || '';\nconst inboxId = body.inbox_id || (body.conversation && body.conversation.inbox_id) || '';\n\n// Only respond to incoming messages (not our own outgoing ones)\nif (messageType === 'outgoing' || event === 'message_updated') {\n  return [{ json: { skip: true, reason: 'Outgoing or updated message — no response needed' } }];\n}\n\nif (!content) {\n  return [{ json: { skip: true, reason: 'Empty message content' } }];\n}\n\nreturn [{ json: {\n  skip: false,\n  conversation_id: conversationId,\n  message: content,\n  contact_name: contactName,\n  contact_email: contactEmail,\n  account_id: accountId,\n  inbox_id: inboxId,\n  event: event,\n  received_at: new Date().toISOString()\n} }];"
+      },
+      "id": "cd-validate",
+      "name": "Validate Chatwoot Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "conditions": [
+            {
+              "id": "cd-skip-cond",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "cd-if-respond",
+      "name": "Should Respond?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ persona: 'daniel', message: 'Respond to client message from ' + $json.contact_name + ': ' + $json.message, customer_name: $json.contact_name, context: 'chatwoot_conversation_' + $json.conversation_id }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "cd-daniel",
+      "name": "Step 1 - Daniel Persona",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const danielRes = $input.first().json;\nconst validated = $('Validate Chatwoot Event').first().json;\n\nconst reply = danielRes.message || danielRes.response || danielRes.content || 'Thank you for your message. A team member will follow up shortly.';\n\nreturn [{ json: {\n  conversation_id: validated.conversation_id,\n  account_id: validated.account_id,\n  reply_content: reply,\n  contact_name: validated.contact_name,\n  original_message: validated.message\n} }];"
+      },
+      "id": "cd-format",
+      "name": "Format Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.CHATWOOT_URL || 'https://chat.manageai.io') + '/api/v1/accounts/' + ($json.account_id || $env.CHATWOOT_ACCOUNT_ID || '1') + '/conversations/' + $json.conversation_id + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "api_access_token", "value": "={{ $env.CHATWOOT_API_KEY || '' }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.reply_content, message_type: 'outgoing', private: false }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "cd-reply",
+      "name": "Step 2 - Reply in Chatwoot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1350, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const replyRes = $input.first().json;\nconst formatted = $('Format Reply').first().json;\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.auto_replies) sd.auto_replies = 0;\nsd.auto_replies++;\n\nreturn [{ json: {\n  success: !replyRes.error,\n  conversation_id: formatted.conversation_id,\n  contact_name: formatted.contact_name,\n  reply_sent: !replyRes.error,\n  chatwoot_message_id: replyRes.id || null,\n  pipeline: 'chatwoot_message → daniel_persona → chatwoot_reply',\n  total_auto_replies: sd.auto_replies,\n  responded_at: new Date().toISOString()\n} }];"
+      },
+      "id": "cd-final",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1570, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { skipped: true, reason: $('Validate Chatwoot Event').first().json.reason || 'Non-actionable event' } }];"
+      },
+      "id": "cd-skip",
+      "name": "Skip Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "cd-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1790, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate Chatwoot Event", "type": "main", "index": 0 }]] },
+    "Validate Chatwoot Event": { "main": [[{ "node": "Should Respond?", "type": "main", "index": 0 }]] },
+    "Should Respond?": {
+      "main": [
+        [{ "node": "Step 1 - Daniel Persona", "type": "main", "index": 0 }],
+        [{ "node": "Skip Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Step 1 - Daniel Persona": { "main": [[{ "node": "Format Reply", "type": "main", "index": 0 }]] },
+    "Format Reply": { "main": [[{ "node": "Step 2 - Reply in Chatwoot", "type": "main", "index": 0 }]] },
+    "Step 2 - Reply in Chatwoot": { "main": [[{ "node": "Final Response", "type": "main", "index": 0 }]] },
+    "Final Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Skip Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

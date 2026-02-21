@@ -1,0 +1,112 @@
+{
+  "name": "Integration: Plane → AMB SOW → AppFlowy",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "integration/plane-sow",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ps-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "plane-sow-generate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\n// Plane webhook payload or direct call\nconst event = body.event || body;\nconst data = event.data || body;\n\nconst projectName = data.project_name || data.name || data.title || '';\nconst clientName = data.client_name || data.customer_name || '';\nconst description = data.description || data.brief || '';\nconst projectId = data.project_id || data.id || 'proj-' + Date.now();\nconst priority = data.priority || 'medium';\n\nif (!projectName && !clientName) {\n  throw new Error('Missing required: project_name or client_name');\n}\n\nreturn [{ json: {\n  project_id: projectId,\n  project_name: projectName,\n  client_name: clientName || projectName.split(' - ')[0] || 'Unknown Client',\n  description: description,\n  priority: priority,\n  source: 'plane_webhook',\n  received_at: new Date().toISOString()\n} }];"
+      },
+      "id": "ps-validate",
+      "name": "Validate Plane Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/sow/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ customer_name: $json.client_name, project_name: $json.project_name, brief: $json.description || $json.project_name, project_id: $json.project_id }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "ps-sow",
+      "name": "Step 1 - AMB Generate SOW",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sowRes = $input.first().json;\nconst validated = $('Validate Plane Event').first().json;\n\nconst sowContent = sowRes.sow || sowRes.document || sowRes.content || sowRes;\nconst sowId = sowRes.sow_id || sowRes.id || 'sow-' + Date.now();\n\n// Format for AppFlowy document creation\nconst docTitle = 'SOW - ' + validated.client_name + ' - ' + validated.project_name;\nconst docContent = typeof sowContent === 'string' ? sowContent : JSON.stringify(sowContent, null, 2);\n\nreturn [{ json: {\n  sow_id: sowId,\n  project_id: validated.project_id,\n  client_name: validated.client_name,\n  project_name: validated.project_name,\n  doc_title: docTitle,\n  doc_content: docContent,\n  sow_raw: sowRes\n} }];"
+      },
+      "id": "ps-extract",
+      "name": "Extract SOW",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APPFLOWY_URL || 'https://appflowy.manageai.io' }}/api/workspace/documents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.APPFLOWY_API_KEY || '') }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ title: $json.doc_title, content: $json.doc_content, folder: '/SOWs/', tags: ['sow', $json.client_name, $json.project_id] }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "ps-appflowy",
+      "name": "Step 2 - Create AppFlowy Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const appflowyRes = $input.first().json;\nconst sowData = $('Extract SOW').first().json;\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.sow_count) sd.sow_count = 0;\nsd.sow_count++;\nsd.last_sow = new Date().toISOString();\n\nreturn [{ json: {\n  success: true,\n  sow_id: sowData.sow_id,\n  project_id: sowData.project_id,\n  client_name: sowData.client_name,\n  appflowy_doc_id: appflowyRes.id || appflowyRes.document_id || null,\n  appflowy_status: appflowyRes.error ? 'failed' : 'created',\n  pipeline: 'plane → amb_sow → appflowy',\n  total_sows_generated: sd.sow_count,\n  created_at: new Date().toISOString()\n} }];"
+      },
+      "id": "ps-final",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "ps-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1570, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate Plane Event", "type": "main", "index": 0 }]] },
+    "Validate Plane Event": { "main": [[{ "node": "Step 1 - AMB Generate SOW", "type": "main", "index": 0 }]] },
+    "Step 1 - AMB Generate SOW": { "main": [[{ "node": "Extract SOW", "type": "main", "index": 0 }]] },
+    "Extract SOW": { "main": [[{ "node": "Step 2 - Create AppFlowy Doc", "type": "main", "index": 0 }]] },
+    "Step 2 - Create AppFlowy Doc": { "main": [[{ "node": "Final Response", "type": "main", "index": 0 }]] },
+    "Final Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

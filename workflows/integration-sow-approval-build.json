@@ -1,0 +1,119 @@
+{
+  "name": "Integration: SOW Approval → Build Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "integration/sow-approval",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "sa-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "sow-approval-build"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst sowId = body.sow_id || body.document_id || '';\nconst projectId = body.project_id || '';\nconst clientName = body.client_name || body.customer_name || '';\nconst approvedBy = body.approved_by || body.approver || 'system';\nconst sowContent = body.sow_content || body.content || '';\nconst targetPlatform = body.target_platform || body.platform || 'make';\n\nif (!sowId && !projectId) {\n  throw new Error('Missing required: sow_id or project_id');\n}\n\nreturn [{ json: {\n  sow_id: sowId,\n  project_id: projectId || 'proj-' + Date.now(),\n  client_name: clientName,\n  approved_by: approvedBy,\n  sow_content: sowContent,\n  target_platform: targetPlatform,\n  approval_timestamp: new Date().toISOString()\n} }];"
+      },
+      "id": "sa-validate",
+      "name": "Validate Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/intake",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ customer_name: $json.client_name, original_request: $json.sow_content || 'Build automation from approved SOW ' + $json.sow_id, project_id: $json.project_id, trigger_type: 'sow_approval', output_action: 'webhook' }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "sa-intake",
+      "name": "Step 1 - AMB Intake",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/plan",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ customer_name: $('Validate Approval').first().json.client_name, original_request: $('Validate Approval').first().json.sow_content || 'Build from SOW', trigger_type: $('Validate Approval').first().json.target_platform === 'n8n' ? 'form_submission' : 'webhook', output_action: 'webhook', target: $('Validate Approval').first().json.target_platform }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "sa-plan",
+      "name": "Step 2 - AMB Plan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/build",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ plan_dict: $json.plan_dict || $json.plan || $json, project_id: $('Validate Approval').first().json.project_id }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "sa-build",
+      "name": "Step 3 - AMB Build",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const buildRes = $input.first().json;\nconst validated = $('Validate Approval').first().json;\nconst planRes = $('Step 2 - AMB Plan').first().json;\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.builds_triggered) sd.builds_triggered = 0;\nsd.builds_triggered++;\nsd.last_build = new Date().toISOString();\n\nconst buildId = buildRes.build_id || buildRes.job_id || buildRes.id || 'build-' + Date.now();\nconst blueprint = buildRes.blueprint || buildRes.scenario || null;\nconst status = buildRes.error ? 'failed' : 'completed';\n\nreturn [{ json: {\n  success: status === 'completed',\n  build_id: buildId,\n  sow_id: validated.sow_id,\n  project_id: validated.project_id,\n  client_name: validated.client_name,\n  target_platform: validated.target_platform,\n  approved_by: validated.approved_by,\n  build_status: status,\n  has_blueprint: !!blueprint,\n  pipeline: 'sow_approval → intake → plan → build',\n  total_builds: sd.builds_triggered,\n  triggered_at: validated.approval_timestamp,\n  completed_at: new Date().toISOString()\n} }];"
+      },
+      "id": "sa-final",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "sa-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1570, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate Approval", "type": "main", "index": 0 }]] },
+    "Validate Approval": { "main": [[{ "node": "Step 1 - AMB Intake", "type": "main", "index": 0 }]] },
+    "Step 1 - AMB Intake": { "main": [[{ "node": "Step 2 - AMB Plan", "type": "main", "index": 0 }]] },
+    "Step 2 - AMB Plan": { "main": [[{ "node": "Step 3 - AMB Build", "type": "main", "index": 0 }]] },
+    "Step 3 - AMB Build": { "main": [[{ "node": "Final Response", "type": "main", "index": 0 }]] },
+    "Final Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

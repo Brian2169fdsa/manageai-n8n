@@ -1,0 +1,147 @@
+{
+  "name": "Integration: Friday 9am → Rebecka Weekly Report → AppFlowy",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 9 * * 5" }]
+        }
+      },
+      "id": "fr-schedule",
+      "name": "Every Friday 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sd = $getWorkflowStaticData('global');\nif (!sd.reports) sd.reports = [];\nif (!sd.total_reports) sd.total_reports = 0;\nsd.total_reports++;\n\nconst weekStart = new Date();\nweekStart.setDate(weekStart.getDate() - 7);\nconst weekEnd = new Date();\n\nreturn [{ json: {\n  report_number: sd.total_reports,\n  week_start: weekStart.toISOString().split('T')[0],\n  week_end: weekEnd.toISOString().split('T')[0],\n  generated_at: new Date().toISOString()\n} }];"
+      },
+      "id": "fr-track",
+      "name": "Track Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://agenticmakebuilder-production.up.railway.app/health",
+        "options": { "timeout": 15000 }
+      },
+      "id": "fr-health",
+      "name": "Step 1 - Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://agenticmakebuilder-production.up.railway.app/metrics",
+        "options": { "timeout": 30000 }
+      },
+      "id": "fr-metrics",
+      "name": "Step 2 - Get Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticmakebuilder-production.up.railway.app/persona/test",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ persona: 'rebecka', message: 'Generate comprehensive weekly report for all active ManageAI clients. Include: project status updates, key milestones achieved this week, upcoming deadlines, any risks or blockers, client satisfaction signals, and recommendations for next week. Week of ' + $('Track Report').first().json.week_start + ' to ' + $('Track Report').first().json.week_end + '. Platform metrics: ' + JSON.stringify($json).substring(0, 500) }) }}",
+        "options": { "timeout": 90000 }
+      },
+      "id": "fr-rebecka",
+      "name": "Step 3 - Rebecka Weekly Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rebeckaRes = $input.first().json;\nconst metricsRes = $('Step 2 - Get Metrics').first().json;\nconst trackInfo = $('Track Report').first().json;\n\nconst reportContent = rebeckaRes.message || rebeckaRes.response || rebeckaRes.content || 'Weekly report generation pending — Rebecka persona unavailable.';\n\nconst metrics = metricsRes.metrics || metricsRes;\nconst totalJobs = metrics.total_jobs || metrics.jobs_count || 'N/A';\nconst successRate = metrics.success_rate || metrics.build_success_rate || 'N/A';\nconst activeClients = metrics.active_clients || metrics.client_count || 'N/A';\n\nconst fullReport = [\n  '# ManageAI Weekly Report #' + trackInfo.report_number,\n  '',\n  '**Week:** ' + trackInfo.week_start + ' → ' + trackInfo.week_end,\n  '**Generated:** ' + trackInfo.generated_at,\n  '**Author:** Rebecka (AI Account Manager)',\n  '',\n  '---',\n  '',\n  '## Platform Metrics',\n  '',\n  '| Metric | Value |',\n  '|--------|-------|',\n  '| Total Jobs | ' + totalJobs + ' |',\n  '| Success Rate | ' + successRate + ' |',\n  '| Active Clients | ' + activeClients + ' |',\n  '',\n  '---',\n  '',\n  '## Client Updates',\n  '',\n  reportContent,\n  '',\n  '---',\n  '',\n  '_Report #' + trackInfo.report_number + ' — Generated automatically by Rebecka via ManageAI n8n_'\n].join('\\n');\n\nreturn [{ json: {\n  report_number: trackInfo.report_number,\n  week_start: trackInfo.week_start,\n  week_end: trackInfo.week_end,\n  doc_title: 'Weekly Report #' + trackInfo.report_number + ' — ' + trackInfo.week_end,\n  doc_content: fullReport,\n  report_content_raw: reportContent\n} }];"
+      },
+      "id": "fr-format",
+      "name": "Format Weekly Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.APPFLOWY_URL || 'https://appflowy.manageai.io') + '/api/workspace/documents' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.APPFLOWY_API_KEY || '') }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ title: $json.doc_title, content: $json.doc_content, folder: '/Weekly Reports/', tags: ['weekly-report', 'rebecka', $json.week_end] }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "fr-appflowy",
+      "name": "Step 4 - Write to AppFlowy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1570, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.com/services/PLACEHOLDER' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: ':clipboard: *Weekly Report #' + $json.report_number + '* published to AppFlowy\\n\\nWeek: ' + $json.week_start + ' → ' + $json.week_end + '\\n\\nView in AppFlowy: /Weekly Reports/' + $json.doc_title }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "fr-slack",
+      "name": "Step 5 - Notify Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1790, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const appflowyRes = $('Step 4 - Write to AppFlowy').first().json;\nconst reportData = $('Format Weekly Report').first().json;\n\nconst sd = $getWorkflowStaticData('global');\nsd.reports.push({\n  report_number: reportData.report_number,\n  week_end: reportData.week_end,\n  appflowy_written: !appflowyRes.error,\n  generated_at: reportData.doc_title\n});\nif (sd.reports.length > 52) sd.reports = sd.reports.slice(-52);\nsd.last_report = new Date().toISOString();\n\nreturn [{ json: {\n  success: true,\n  report_number: reportData.report_number,\n  week: reportData.week_start + ' → ' + reportData.week_end,\n  appflowy_written: !appflowyRes.error,\n  appflowy_doc_id: appflowyRes.id || appflowyRes.document_id || null,\n  pipeline: 'friday_9am → metrics → rebecka_report → appflowy → slack',\n  total_reports: sd.total_reports,\n  completed_at: new Date().toISOString()\n} }];"
+      },
+      "id": "fr-final",
+      "name": "Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2010, 300]
+    }
+  ],
+  "connections": {
+    "Every Friday 9am": { "main": [[{ "node": "Track Report", "type": "main", "index": 0 }]] },
+    "Track Report": { "main": [[{ "node": "Step 1 - Health Check", "type": "main", "index": 0 }]] },
+    "Step 1 - Health Check": { "main": [[{ "node": "Step 2 - Get Metrics", "type": "main", "index": 0 }]] },
+    "Step 2 - Get Metrics": { "main": [[{ "node": "Step 3 - Rebecka Weekly Report", "type": "main", "index": 0 }]] },
+    "Step 3 - Rebecka Weekly Report": { "main": [[{ "node": "Format Weekly Report", "type": "main", "index": 0 }]] },
+    "Format Weekly Report": { "main": [[{ "node": "Step 4 - Write to AppFlowy", "type": "main", "index": 0 }]] },
+    "Step 4 - Write to AppFlowy": { "main": [[{ "node": "Step 5 - Notify Slack", "type": "main", "index": 0 }]] },
+    "Step 5 - Notify Slack": { "main": [[{ "node": "Final Summary", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

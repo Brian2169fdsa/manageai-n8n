@@ -13,7 +13,7 @@
     },
     {
       "parameters": {
-        "method": "POST", "url": "=https://n8n-production-13ed.up.railway.app{{ $json.webhook }}",
+        "method": "POST", "url": "={{ $env.N8N_BASE_URL || 'https://n8n.manageai.io' }}{{ $json.webhook }}",
         "sendHeaders": true, "headerParameters": {"parameters":[{"name":"Content-Type","value":"application/json"}]},
         "sendBody": true, "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",

@@ -1,0 +1,115 @@
+{
+  "name": "Integration: Build Complete → Plane + Chatwoot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "integration/build-complete",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "bc-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "build-complete-notify"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst projectId = body.project_id || body.id || '';\nconst buildStatus = body.build_status || body.status || 'completed';\nconst clientName = body.client_name || body.customer_name || '';\nconst projectName = body.project_name || body.name || '';\nconst buildId = body.build_id || body.job_id || '';\nconst blueprintId = body.blueprint_id || '';\nconst confidence = body.confidence_score || body.confidence || 0;\nconst artifacts = body.artifacts || [];\n\nif (!projectId) throw new Error('Missing required: project_id');\n\nreturn [{ json: {\n  project_id: projectId,\n  build_id: buildId,\n  build_status: buildStatus,\n  client_name: clientName,\n  project_name: projectName,\n  blueprint_id: blueprintId,\n  confidence_score: confidence,\n  artifact_count: artifacts.length,\n  completed_at: new Date().toISOString()\n} }];"
+      },
+      "id": "bc-validate",
+      "name": "Validate Build Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ ($env.PLANE_URL || 'https://plane.manageai.io') + '/api/v1/workspaces/manageai/projects/' + $json.project_id + '/issues/' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-API-Key", "value": "={{ $env.PLANE_API_KEY || '' }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ state: $json.build_status === 'completed' ? 'done' : 'failed', label: 'build-' + $json.build_status, comment: 'Build ' + $json.build_id + ' ' + $json.build_status + ' with confidence ' + $json.confidence_score + '. Artifacts: ' + $json.artifact_count }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "bc-plane",
+      "name": "Step 1 - Update Plane",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const planeRes = $input.first().json;\nconst validated = $('Validate Build Event').first().json;\n\n// Format Chatwoot message\nconst statusEmoji = validated.build_status === 'completed' ? '✅' : '❌';\nconst message = statusEmoji + ' Build Update: ' + validated.project_name + '\\n\\n' +\n  'Client: ' + validated.client_name + '\\n' +\n  'Status: ' + validated.build_status.toUpperCase() + '\\n' +\n  'Confidence: ' + (validated.confidence_score * 100).toFixed(0) + '%\\n' +\n  'Artifacts: ' + validated.artifact_count + '\\n' +\n  'Build ID: ' + validated.build_id + '\\n\\n' +\n  (validated.build_status === 'completed'\n    ? 'Your automation is ready for deployment. The team will review and deploy shortly.'\n    : 'The build needs attention. Our team has been notified and is investigating.');\n\nreturn [{ json: {\n  ...validated,\n  chatwoot_message: message,\n  plane_updated: !planeRes.error,\n  plane_response: planeRes\n} }];"
+      },
+      "id": "bc-format-chatwoot",
+      "name": "Format Chatwoot Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.CHATWOOT_URL || 'https://chat.manageai.io') + '/api/v1/accounts/' + ($env.CHATWOOT_ACCOUNT_ID || '1') + '/conversations/' + ($json.project_id || '1') + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "api_access_token", "value": "={{ $env.CHATWOOT_API_KEY || '' }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.chatwoot_message, message_type: 'outgoing', private: false }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "bc-chatwoot",
+      "name": "Step 2 - Notify Chatwoot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatwootRes = $input.first().json;\nconst formatted = $('Format Chatwoot Message').first().json;\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.notifications_sent) sd.notifications_sent = 0;\nsd.notifications_sent++;\n\nreturn [{ json: {\n  success: true,\n  project_id: formatted.project_id,\n  build_id: formatted.build_id,\n  build_status: formatted.build_status,\n  plane_updated: formatted.plane_updated,\n  chatwoot_notified: !chatwootRes.error,\n  pipeline: 'build_complete → plane_update → chatwoot_notify',\n  total_notifications: sd.notifications_sent,\n  completed_at: new Date().toISOString()\n} }];"
+      },
+      "id": "bc-final",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "bc-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1570, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate Build Event", "type": "main", "index": 0 }]] },
+    "Validate Build Event": { "main": [[{ "node": "Step 1 - Update Plane", "type": "main", "index": 0 }]] },
+    "Step 1 - Update Plane": { "main": [[{ "node": "Format Chatwoot Message", "type": "main", "index": 0 }]] },
+    "Format Chatwoot Message": { "main": [[{ "node": "Step 2 - Notify Chatwoot", "type": "main", "index": 0 }]] },
+    "Step 2 - Notify Chatwoot": { "main": [[{ "node": "Final Response", "type": "main", "index": 0 }]] },
+    "Final Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

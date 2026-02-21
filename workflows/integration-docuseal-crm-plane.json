@@ -1,0 +1,143 @@
+{
+  "name": "Integration: Docuseal Signature → Twenty CRM + Plane",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "integration/docuseal-signed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ds-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "docuseal-signed"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\n// Docuseal webhook payload\nconst event = body.event_type || body.event || 'form.completed';\nconst submission = body.data || body.submission || body;\nconst signerName = submission.signer_name || submission.name || body.signer_name || '';\nconst signerEmail = submission.signer_email || submission.email || body.signer_email || '';\nconst documentName = submission.document_name || submission.template_name || body.document_name || '';\nconst documentId = submission.document_id || submission.submission_id || body.document_id || '';\nconst completedAt = submission.completed_at || body.completed_at || new Date().toISOString();\nconst documentUrl = submission.document_url || submission.download_url || body.document_url || '';\n\n// Extract client/project info from document name\nconst docParts = documentName.split(' - ');\nconst clientName = body.client_name || (docParts.length > 1 ? docParts[1].trim() : signerName);\nconst projectName = body.project_name || (docParts.length > 0 ? docParts[0].trim() : documentName);\n\nif (!signerName && !signerEmail) {\n  throw new Error('Missing required: signer_name or signer_email');\n}\n\nreturn [{ json: {\n  event: event,\n  signer_name: signerName,\n  signer_email: signerEmail,\n  client_name: clientName,\n  project_name: projectName,\n  document_name: documentName,\n  document_id: documentId,\n  document_url: documentUrl,\n  completed_at: completedAt\n} }];"
+      },
+      "id": "ds-validate",
+      "name": "Validate Docuseal Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.TWENTY_CRM_URL || 'https://crm.manageai.io') + '/api/companies' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.TWENTY_API_KEY || '') }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $json.client_name, domainName: $json.signer_email ? $json.signer_email.split('@')[1] || '' : '', employees: 0, address: { addressCity: '' }, createdBy: { source: 'IMPORT', workspaceMemberId: null }, accountOwnerId: null }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "ds-crm-company",
+      "name": "Step 1a - Create CRM Company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.TWENTY_CRM_URL || 'https://crm.manageai.io') + '/api/people' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + ($env.TWENTY_API_KEY || '') }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: { firstName: $json.signer_name.split(' ')[0] || $json.signer_name, lastName: $json.signer_name.split(' ').slice(1).join(' ') || '' }, email: { primaryEmail: $json.signer_email }, createdBy: { source: 'IMPORT' } }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "ds-crm-person",
+      "name": "Step 1b - Create CRM Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const companyRes = $('Step 1a - Create CRM Company').first().json;\nconst personRes = $input.first().json;\nconst validated = $('Validate Docuseal Event').first().json;\n\nreturn [{ json: {\n  ...validated,\n  crm_company_id: companyRes.id || companyRes.data && companyRes.data.id || null,\n  crm_company_created: !companyRes.error,\n  crm_person_id: personRes.id || personRes.data && personRes.data.id || null,\n  crm_person_created: !personRes.error\n} }];"
+      },
+      "id": "ds-merge-crm",
+      "name": "Merge CRM Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.PLANE_URL || 'https://plane.manageai.io') + '/api/v1/workspaces/manageai/projects/' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-API-Key", "value": "={{ $env.PLANE_API_KEY || '' }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $json.project_name + ' - ' + $json.client_name, description: 'Auto-created from signed SOW. Document: ' + $json.document_name + '. Signer: ' + $json.signer_name + ' (' + $json.signer_email + '). Signed: ' + $json.completed_at, identifier: ($json.client_name.substring(0,3) + '-' + Date.now().toString().slice(-4)).toUpperCase(), network: 2 }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "ds-plane",
+      "name": "Step 2 - Create Plane Project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const planeRes = $input.first().json;\nconst merged = $('Merge CRM Results').first().json;\n\nconst sd = $getWorkflowStaticData('global');\nif (!sd.signatures_processed) sd.signatures_processed = 0;\nsd.signatures_processed++;\nsd.last_signature = new Date().toISOString();\n\nreturn [{ json: {\n  success: true,\n  signer_name: merged.signer_name,\n  signer_email: merged.signer_email,\n  client_name: merged.client_name,\n  document_name: merged.document_name,\n  crm_company_created: merged.crm_company_created,\n  crm_company_id: merged.crm_company_id,\n  crm_person_created: merged.crm_person_created,\n  crm_person_id: merged.crm_person_id,\n  plane_project_created: !planeRes.error,\n  plane_project_id: planeRes.id || planeRes.identifier || null,\n  pipeline: 'docuseal_signature → twenty_crm → plane_project',\n  total_signatures_processed: sd.signatures_processed,\n  processed_at: new Date().toISOString()\n} }];"
+      },
+      "id": "ds-final",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": { "responseCode": 200 }
+      },
+      "id": "ds-respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1570, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Validate Docuseal Event", "type": "main", "index": 0 }]] },
+    "Validate Docuseal Event": {
+      "main": [[
+        { "node": "Step 1a - Create CRM Company", "type": "main", "index": 0 },
+        { "node": "Step 1b - Create CRM Contact", "type": "main", "index": 0 }
+      ]]
+    },
+    "Step 1b - Create CRM Contact": { "main": [[{ "node": "Merge CRM Results", "type": "main", "index": 0 }]] },
+    "Merge CRM Results": { "main": [[{ "node": "Step 2 - Create Plane Project", "type": "main", "index": 0 }]] },
+    "Step 2 - Create Plane Project": { "main": [[{ "node": "Final Response", "type": "main", "index": 0 }]] },
+    "Final Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

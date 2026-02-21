@@ -1,0 +1,175 @@
+{
+  "name": "MCP Server Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "manageai-mcp",
+        "options": {}
+      },
+      "id": "mcp-trigger",
+      "name": "MCP Trigger",
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 1,
+      "position": [250, 500]
+    },
+    {
+      "parameters": {
+        "name": "daniel-sales-followup",
+        "description": "Generate a personalized sales follow-up message using the Daniel persona. Requires customer_name. Optional: company, last_interaction, deal_stage (discovery|proposal|negotiation|closed_won|closed_lost). Returns follow_up_message, next_action, recommended_template, priority.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"customer_name\": { \"type\": \"string\", \"description\": \"Name of the customer to follow up with\" },\n    \"company\": { \"type\": \"string\", \"description\": \"Company name of the customer\" },\n    \"last_interaction\": { \"type\": \"string\", \"description\": \"Description of the last interaction with the customer\" },\n    \"deal_stage\": { \"type\": \"string\", \"description\": \"Current deal stage: discovery, proposal, negotiation, closed_won, or closed_lost\" }\n  },\n  \"required\": [\"customer_name\"]\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst response = await fetch(baseUrl + '/webhook/daniel/followup', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    customer_name: $input.customer_name,\n    company: $input.company || '',\n    last_interaction: $input.last_interaction || '',\n    deal_stage: $input.deal_stage || 'discovery'\n  })\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-daniel",
+      "name": "Tool: Daniel Sales Followup",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 100]
+    },
+    {
+      "parameters": {
+        "name": "sarah-content-generator",
+        "description": "Generate marketing content using the Sarah persona. Requires topic. Optional: format (blog|email|social), target_audience, tone. Returns content, word_count, seo_keywords, reading_time_minutes, format_metadata.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"topic\": { \"type\": \"string\", \"description\": \"Topic for the content to be generated\" },\n    \"format\": { \"type\": \"string\", \"description\": \"Content format: blog, email, or social\" },\n    \"target_audience\": { \"type\": \"string\", \"description\": \"Target audience for the content\" },\n    \"tone\": { \"type\": \"string\", \"description\": \"Desired tone: professional, casual, etc.\" }\n  },\n  \"required\": [\"topic\"]\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst response = await fetch(baseUrl + '/webhook/sarah/content', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    topic: $input.topic,\n    format: $input.format || 'blog',\n    target_audience: $input.target_audience || 'general',\n    tone: $input.tone || 'professional'\n  })\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-sarah",
+      "name": "Tool: Sarah Content Generator",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "name": "andrew-ops-report",
+        "description": "Generate an operations report using the Andrew persona. Requires client_id. Optional: report_type (weekly|monthly), include_costs (boolean). Returns report_markdown, period, client_id.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"client_id\": { \"type\": \"string\", \"description\": \"Client identifier for the ops report\" },\n    \"report_type\": { \"type\": \"string\", \"description\": \"Report type: weekly or monthly\" },\n    \"include_costs\": { \"type\": \"boolean\", \"description\": \"Whether to include cost analysis in the report\" }\n  },\n  \"required\": [\"client_id\"]\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst response = await fetch(baseUrl + '/webhook/andrew/report', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    client_id: $input.client_id,\n    report_type: $input.report_type || 'weekly',\n    include_costs: $input.include_costs !== false\n  })\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-andrew",
+      "name": "Tool: Andrew Ops Report",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "name": "rebecka-meeting-prep",
+        "description": "Prepare a meeting brief using the Rebecka persona. Requires client_name. Optional: meeting_type, agenda_items (comma-separated), attendees (comma-separated emails). Returns meeting_brief, calendar_block, pre_read, follow_up_email_template.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"client_name\": { \"type\": \"string\", \"description\": \"Name of the client for the meeting\" },\n    \"meeting_type\": { \"type\": \"string\", \"description\": \"Type of meeting: general, review, quarterly, planning, kickoff\" },\n    \"agenda_items\": { \"type\": \"string\", \"description\": \"Comma-separated list of agenda items\" },\n    \"attendees\": { \"type\": \"string\", \"description\": \"Comma-separated list of attendee emails\" }\n  },\n  \"required\": [\"client_name\"]\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst agendaItems = $input.agenda_items ? $input.agenda_items.split(',').map(s => s.trim()) : [];\nconst attendees = $input.attendees ? $input.attendees.split(',').map(s => s.trim()) : [];\nconst response = await fetch(baseUrl + '/webhook/rebecka/meeting', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    client_name: $input.client_name,\n    meeting_type: $input.meeting_type || 'general',\n    agenda_items: agendaItems,\n    attendees: attendees\n  })\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-rebecka",
+      "name": "Tool: Rebecka Meeting Prep",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "name": "full-project-pipeline",
+        "description": "Run the full ManageAI project pipeline: plan, verify, cost estimate, and memory store. Requires customer_name, original_request, trigger_type, output_action. Optional: business_objective. Returns project_id, plan, verification, cost_estimate, pipeline_status.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"customer_name\": { \"type\": \"string\", \"description\": \"Name of the customer\" },\n    \"original_request\": { \"type\": \"string\", \"description\": \"The original request or project description\" },\n    \"trigger_type\": { \"type\": \"string\", \"description\": \"How the project was triggered (e.g. webhook, manual, scheduled)\" },\n    \"output_action\": { \"type\": \"string\", \"description\": \"Desired output action (e.g. deploy, review, report)\" },\n    \"business_objective\": { \"type\": \"string\", \"description\": \"Business objective for the project\" }\n  },\n  \"required\": [\"customer_name\", \"original_request\", \"trigger_type\", \"output_action\"]\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst response = await fetch(baseUrl + '/webhook/project/pipeline', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    customer_name: $input.customer_name,\n    original_request: $input.original_request,\n    trigger_type: $input.trigger_type,\n    output_action: $input.output_action,\n    business_objective: $input.business_objective || $input.original_request\n  })\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-pipeline",
+      "name": "Tool: Full Project Pipeline",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 500]
+    },
+    {
+      "parameters": {
+        "name": "persona-selector",
+        "description": "Automatically select the best ManageAI persona for a given request. Routes to Daniel (sales), Sarah (marketing/content), Andrew (ops/reports), or Rebecka (executive/urgent). Requires customer_name. Optional: request_type, urgency (low|medium|high), department. Returns selected_persona, persona_reason, response.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"customer_name\": { \"type\": \"string\", \"description\": \"Name of the customer\" },\n    \"request_type\": { \"type\": \"string\", \"description\": \"Type of request (e.g. follow-up, content, report)\" },\n    \"urgency\": { \"type\": \"string\", \"description\": \"Urgency level: low, medium, or high\" },\n    \"department\": { \"type\": \"string\", \"description\": \"Department: sales, marketing, ops, executive\" }\n  },\n  \"required\": [\"customer_name\"]\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst response = await fetch(baseUrl + '/webhook/persona/select', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    customer_name: $input.customer_name,\n    request_type: $input.request_type || '',\n    urgency: $input.urgency || 'medium',\n    department: $input.department || ''\n  })\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-persona",
+      "name": "Tool: Persona Selector",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "name": "makecom-deploy-bridge",
+        "description": "Deploy a Make.com scenario via the ManageAI bridge. Requires project_id, scenario_name, blueprint (JSON string). Optional: activate (boolean, default true). Returns status, scenario_id, make_url, hook_url.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"project_id\": { \"type\": \"string\", \"description\": \"Project identifier for the deployment\" },\n    \"scenario_name\": { \"type\": \"string\", \"description\": \"Name of the Make.com scenario to deploy\" },\n    \"blueprint\": { \"type\": \"string\", \"description\": \"JSON string of the Make.com scenario blueprint\" },\n    \"activate\": { \"type\": \"boolean\", \"description\": \"Whether to activate the scenario after deployment (default: true)\" }\n  },\n  \"required\": [\"project_id\", \"scenario_name\", \"blueprint\"]\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nlet blueprint = $input.blueprint;\nif (typeof blueprint === 'string') {\n  try { blueprint = JSON.parse(blueprint); } catch(e) { blueprint = { raw: blueprint }; }\n}\nconst response = await fetch(baseUrl + '/webhook/makecom/deploy', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    project_id: $input.project_id,\n    scenario_name: $input.scenario_name,\n    blueprint: blueprint,\n    activate: $input.activate !== false\n  })\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-deploy",
+      "name": "Tool: Make.com Deploy Bridge",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 700]
+    },
+    {
+      "parameters": {
+        "name": "error-replay",
+        "description": "Replay failed workflow executions from the ManageAI error log. Provide error_id to replay a specific error, or set batch_replay to true to replay all pending retryable errors. Optional: category, severity filters for batch mode. Returns replayed count, succeeded, still_failing, results.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"error_id\": { \"type\": \"string\", \"description\": \"Specific error ID to replay\" },\n    \"batch_replay\": { \"type\": \"boolean\", \"description\": \"Set to true to replay all pending retryable errors\" },\n    \"category\": { \"type\": \"string\", \"description\": \"Filter batch replay by error category\" },\n    \"severity\": { \"type\": \"string\", \"description\": \"Filter batch replay by severity\" }\n  }\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst body = {};\nif ($input.error_id) { body.error_id = $input.error_id; }\nelse { body.batch_replay = $input.batch_replay !== false; }\nif ($input.category) body.category = $input.category;\nif ($input.severity) body.severity = $input.severity;\nconst response = await fetch(baseUrl + '/webhook/errors/replay', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(body)\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-replay",
+      "name": "Tool: Error Replay",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 800]
+    },
+    {
+      "parameters": {
+        "name": "analytics-report",
+        "description": "Get the ManageAI analytics report with usage stats, error rates, token counts, and workflow performance. Optional: period (all|today). Returns total_calls, total_errors, error_rate, total_tokens, most_used_workflow, most_active_persona, by_workflow, by_persona, by_day.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"period\": { \"type\": \"string\", \"description\": \"Report period: all or today\" }\n  }\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nconst period = $input.period || 'all';\nconst response = await fetch(baseUrl + '/webhook/analytics/report?period=' + encodeURIComponent(period), {\n  method: 'GET',\n  headers: { 'Content-Type': 'application/json' }\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-analytics",
+      "name": "Tool: Analytics Report",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 900]
+    },
+    {
+      "parameters": {
+        "name": "webhook-registry-list",
+        "description": "List all registered ManageAI webhooks from the webhook registry. Optional: owner filter (daniel|sarah|andrew|rebecka|system), version filter. Returns total count and full webhook list with paths, required fields, output fields, and status.",
+        "specifyInputSchema": true,
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"owner\": { \"type\": \"string\", \"description\": \"Filter by webhook owner: daniel, sarah, andrew, rebecka, or system\" },\n    \"version\": { \"type\": \"string\", \"description\": \"Filter by webhook version number\" }\n  }\n}",
+        "jsCode": "const baseUrl = 'https://n8n.manageai.io';\nlet url = baseUrl + '/webhook/registry/list';\nconst params = [];\nif ($input.owner) params.push('owner=' + encodeURIComponent($input.owner));\nif ($input.version) params.push('version=' + encodeURIComponent($input.version));\nif (params.length > 0) url += '?' + params.join('&');\nconst response = await fetch(url, {\n  method: 'GET',\n  headers: { 'Content-Type': 'application/json' }\n});\nconst data = await response.json();\nreturn JSON.stringify(data);"
+      },
+      "id": "mcp-tool-registry",
+      "name": "Tool: Webhook Registry List",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [500, 1000]
+    }
+  ],
+  "connections": {
+    "MCP Trigger": {
+      "ai_tool": [
+        [
+          { "node": "Tool: Daniel Sales Followup", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Sarah Content Generator", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Andrew Ops Report", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Rebecka Meeting Prep", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Full Project Pipeline", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Persona Selector", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Make.com Deploy Bridge", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Error Replay", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Analytics Report", "type": "ai_tool", "index": 0 },
+          { "node": "Tool: Webhook Registry List", "type": "ai_tool", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
